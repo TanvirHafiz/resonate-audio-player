@@ -1,10 +1,12 @@
 use crate::streaming::StreamReader;
+use rodio::cpal;
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::stream::{DeviceSinkBuilder, MixerDeviceSink};
 use rodio::{Decoder, Player as RodioPlayer, Source};
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub struct PlaybackState {
     _sink_device: MixerDeviceSink,
@@ -13,6 +15,7 @@ pub struct PlaybackState {
     pub queue_index: Option<usize>,
     pub is_playing: bool,
     session_id: i64,
+    device_name: String,
 }
 
 pub struct Player(pub Mutex<PlaybackState>);
@@ -26,6 +29,10 @@ impl Player {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
+        let device_name = cpal::default_host()
+            .default_output_device()
+            .and_then(|d| d.description().ok().map(|desc| desc.name().to_string()))
+            .unwrap_or_else(|| "Default".to_string());
         Player(Mutex::new(PlaybackState {
             _sink_device: sink_device,
             player,
@@ -33,8 +40,56 @@ impl Player {
             queue_index: None,
             is_playing: false,
             session_id,
+            device_name,
         }))
     }
+}
+
+/// Lists the names of available audio output devices (used by the
+/// pro-tier settings panel; the capability lives here since only this
+/// module can touch `PlaybackState`'s internals).
+pub fn list_output_devices() -> Vec<String> {
+    cpal::default_host()
+        .output_devices()
+        .map(|devices| {
+            devices
+                .filter_map(|d| d.description().ok().map(|desc| desc.name().to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn current_output_device(player: &Player) -> String {
+    player.0.lock().unwrap().device_name.clone()
+}
+
+/// Switches audio output to the named device, rebuilding the sink/mixer.
+/// This stops whatever is currently playing (the queue position is kept,
+/// so the frontend can just hit play again); there is no in-place device
+/// hot-swap without interrupting the audio stream.
+pub fn set_output_device(player: &Player, device_name: &str) -> Result<(), String> {
+    let device = cpal::default_host()
+        .output_devices()
+        .map_err(|e| e.to_string())?
+        .find(|d| {
+            d.description()
+                .map(|desc| desc.name() == device_name)
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| format!("output device '{device_name}' not found"))?;
+
+    let sink_device = DeviceSinkBuilder::from_device(device)
+        .map_err(|e| e.to_string())?
+        .open_stream()
+        .map_err(|e| e.to_string())?;
+    let new_player = RodioPlayer::connect_new(sink_device.mixer());
+
+    let mut state = player.0.lock().unwrap();
+    state._sink_device = sink_device;
+    state.player = new_player;
+    state.is_playing = false;
+    state.device_name = device_name.to_string();
+    Ok(())
 }
 
 pub fn session_id(player: &Player) -> i64 {
@@ -110,6 +165,19 @@ pub fn get_volume(player: &Player) -> f32 {
 pub fn position_seconds(player: &Player) -> f64 {
     let state = player.0.lock().unwrap();
     state.player.get_pos().as_secs_f64()
+}
+
+/// Seeks the currently loaded track/stream to `position_seconds`. Works for
+/// local files; for a progressively-downloading stream this blocks until
+/// enough of it has been buffered to reach the target (see
+/// `streaming::StreamReader::seek`), so a far-forward seek on a stream can
+/// take a moment.
+pub fn seek(player: &Player, position_seconds: f64) -> Result<(), String> {
+    let state = player.0.lock().unwrap();
+    state
+        .player
+        .try_seek(Duration::from_secs_f64(position_seconds.max(0.0)))
+        .map_err(|e| e.to_string())
 }
 
 pub fn is_playing(player: &Player) -> bool {

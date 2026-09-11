@@ -15,7 +15,11 @@ CREATE TABLE IF NOT EXISTS tracks (
     year INTEGER,
     duration_seconds REAL,
     date_added TEXT DEFAULT CURRENT_TIMESTAMP,
-    source_type TEXT CHECK(source_type IN ('local','radio','podcast','url')) NOT NULL
+    source_type TEXT CHECK(source_type IN ('local','radio','podcast','url')) NOT NULL,
+    -- 0 once the user removes a track from the library; the row (and its
+    -- file/history/features) is kept alive as long as a playlist still
+    -- references it, so playlists don't lose tracks when the library does.
+    in_library INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS track_features (
@@ -98,9 +102,28 @@ pub fn open_connection(app_data_dir: &Path) -> Connection {
     conn
 }
 
+fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+    let mut stmt = match conn.prepare(&format!("PRAGMA table_info({table})")) {
+        Ok(stmt) => stmt,
+        Err(_) => return false,
+    };
+    stmt.query_map([], |row| row.get::<_, String>(1))
+        .map(|rows| rows.filter_map(Result::ok).any(|name| name == column))
+        .unwrap_or(false)
+}
+
 pub fn init(app_data_dir: &Path) -> Connection {
     std::fs::create_dir_all(app_data_dir).expect("failed to create app data dir");
     let conn = open_connection(app_data_dir);
     conn.execute_batch(SCHEMA).expect("failed to run migrations");
+
+    // `tracks` predates the `in_library` column; add it for databases
+    // created before that column existed (fresh installs already have it
+    // via SCHEMA above, so this is a no-op there).
+    if !column_exists(&conn, "tracks", "in_library") {
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN in_library INTEGER NOT NULL DEFAULT 1;")
+            .expect("failed to add in_library column");
+    }
+
     conn
 }

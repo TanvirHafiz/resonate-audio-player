@@ -93,7 +93,8 @@ pub fn get_library_folders(db: State<Db>) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub fn get_tracks(db: State<Db>) -> Result<Vec<Track>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let sql = format!("SELECT {TRACK_COLUMNS} FROM tracks ORDER BY artist, album, title");
+    let sql =
+        format!("SELECT {TRACK_COLUMNS} FROM tracks WHERE in_library = 1 ORDER BY artist, album, title");
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], track_from_row)
@@ -212,6 +213,11 @@ pub fn previous_track(db: State<Db>, player: State<Player>) -> Result<Option<Tra
 #[tauri::command]
 pub fn set_volume(player: State<Player>, volume: f32) {
     playback::set_volume(&player, volume);
+}
+
+#[tauri::command]
+pub fn seek_to(player: State<Player>, position_seconds: f64) -> Result<(), String> {
+    playback::seek(&player, position_seconds)
 }
 
 #[tauri::command]

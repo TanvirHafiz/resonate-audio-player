@@ -76,7 +76,11 @@ pub fn more_like_this(conn: &Connection, seed_track_id: i64, limit: usize) -> Re
     };
 
     let mut stmt = conn
-        .prepare("SELECT track_id FROM track_features WHERE track_id != ?1")
+        .prepare(
+            "SELECT tf.track_id FROM track_features tf
+             JOIN tracks t ON t.id = tf.track_id
+             WHERE tf.track_id != ?1 AND t.in_library = 1",
+        )
         .map_err(|e| e.to_string())?;
     let candidate_ids: Vec<i64> = stmt
         .query_map(params![seed_track_id], |row| row.get(0))
@@ -143,7 +147,7 @@ pub fn for_you_queue(conn: &Connection, limit: usize) -> Result<Vec<i64>, String
                  FROM tracks t
                  JOIN track_features tf ON tf.track_id = t.id
                  LEFT JOIN track_affinity a ON a.track_id = t.id
-                 WHERE t.source_type = 'local'",
+                 WHERE t.source_type = 'local' AND t.in_library = 1",
             )
             .map_err(|e| e.to_string())?;
         let result: Vec<Candidate> = stmt

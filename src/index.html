@@ -71,6 +71,14 @@
 
         <div class="folder-list" id="folder-list"></div>
 
+        <div class="playlists-section" id="playlists-section" hidden>
+          <div class="playlists-header">
+            <span class="track-list-label">Playlists</span>
+            <button class="btn-ghost" id="new-playlist-btn" title="New playlist">+ New</button>
+          </div>
+          <div class="playlist-chips" id="playlist-chips"></div>
+        </div>
+
         <div class="track-list-wrap">
           <div class="track-list-label-row">
             <div class="view-tabs" id="view-tabs">
@@ -78,6 +86,11 @@
               <button class="tab-btn" data-view="foryou" id="foryou-tab" hidden>For You</button>
             </div>
             <button id="remove-selected-btn" class="btn-ghost remove-selected-btn" title="Remove selected from library">Remove</button>
+          </div>
+
+          <div class="playlist-banner" id="playlist-banner" hidden>
+            <span id="playlist-banner-text"></span>
+            <button class="btn-ghost" id="playlist-banner-clear">Done</button>
           </div>
 
           <div class="similar-panel" id="similar-panel" hidden>
@@ -112,8 +125,9 @@
 
           <div class="scrubber-row">
             <span class="time mono" id="time-current">0:00</span>
-            <div class="scrubber-track">
+            <div class="scrubber-track" id="scrubber-track">
               <div class="scrubber-fill" id="scrubber-fill"></div>
+              <div class="scrubber-thumb" id="scrubber-thumb"></div>
             </div>
             <span class="time mono" id="time-total">0:00</span>
           </div>
@@ -131,11 +145,30 @@
             <input type="range" id="volume-slider" min="0" max="100" value="80" />
           </div>
           <div class="control-strip-right">
-            <button class="btn-ghost" id="output-btn" title="Output device (coming soon)">Output</button>
+            <button class="btn-ghost" id="settings-btn" title="Settings">Settings</button>
             <button class="btn-ghost" id="eq-btn" title="Equalizer (coming soon)">EQ</button>
           </div>
         </div>
       </main>
+
+      <div class="modal-overlay" id="settings-modal" hidden>
+        <div class="modal-panel">
+          <div class="modal-header">
+            <span class="modal-title">Settings</span>
+            <button class="btn-ghost stream-close" id="settings-close-btn" title="Close">&#10005;</button>
+          </div>
+
+          <div class="modal-section">
+            <div class="modal-section-label">Library Folders</div>
+            <div class="settings-folder-list" id="settings-folder-list"></div>
+          </div>
+
+          <div class="modal-section">
+            <div class="modal-section-label">Audio Output</div>
+            <select class="stream-input" id="output-device-select"></select>
+          </div>
+        </div>
+      </div>
       </div>
     </div>
   </body>

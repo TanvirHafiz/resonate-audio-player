@@ -1,8 +1,10 @@
+use super::playlists::{self, Playlist};
 use super::recommendation_engine;
 use super::worker::FeatureQueue;
 use crate::api::{track_from_row, TRACK_COLUMNS};
 use crate::db::Db;
 use crate::models::Track;
+use crate::playback::{self, Player};
 use rusqlite::params;
 use serde::Serialize;
 use tauri::State;
@@ -110,4 +112,74 @@ pub fn requeue_unanalyzed_tracks(db: State<Db>, queue: State<FeatureQueue>) -> R
     let count = ids.len();
     queue.enqueue_all(ids);
     Ok(count)
+}
+
+// ---------- Playlists ----------
+
+#[tauri::command]
+pub fn create_playlist(db: State<Db>, name: String) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    playlists::create(&conn, &name)
+}
+
+#[tauri::command]
+pub fn rename_playlist(db: State<Db>, playlist_id: i64, name: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    playlists::rename(&conn, playlist_id, &name)
+}
+
+#[tauri::command]
+pub fn delete_playlist(db: State<Db>, playlist_id: i64) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    playlists::delete(&conn, playlist_id)
+}
+
+#[tauri::command]
+pub fn list_playlists(db: State<Db>) -> Result<Vec<Playlist>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    playlists::list(&conn)
+}
+
+#[tauri::command]
+pub fn get_playlist_tracks(db: State<Db>, playlist_id: i64) -> Result<Vec<Track>, String> {
+    let ids = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        playlists::tracks(&conn, playlist_id)?
+    };
+    tracks_by_ids(&db, &ids)
+}
+
+#[tauri::command]
+pub fn add_track_to_playlist(db: State<Db>, playlist_id: i64, track_id: i64) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    playlists::add_track(&conn, playlist_id, track_id)
+}
+
+#[tauri::command]
+pub fn remove_track_from_playlist(db: State<Db>, playlist_id: i64, track_id: i64) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    playlists::remove_track(&conn, playlist_id, track_id)
+}
+
+// ---------- Settings ----------
+
+#[tauri::command]
+pub fn remove_library_folder(db: State<Db>, path: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    super::settings::remove_library_folder(&conn, &path)
+}
+
+#[tauri::command]
+pub fn list_output_devices() -> Vec<String> {
+    playback::list_output_devices()
+}
+
+#[tauri::command]
+pub fn get_current_output_device(player: State<Player>) -> String {
+    playback::current_output_device(&player)
+}
+
+#[tauri::command]
+pub fn set_output_device(player: State<Player>, device_name: String) -> Result<(), String> {
+    playback::set_output_device(&player, &device_name)
 }

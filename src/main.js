@@ -15,12 +15,16 @@ let appTier = "free";
 
 let tracks = [];
 let forYouTracks = [];
+let playlistTracks = [];
 let displayTracks = [];
-let viewMode = "library"; // "library" | "foryou"
+let viewMode = "library"; // "library" | "foryou" | "playlist"
 let trackTags = {}; // { [track_id]: { mood: string[], genre: string[] } }
+let playlists = [];
+let activePlaylistId = null;
 let nowPlaying = null;
 let pollHandle = null;
 let isSeeking = false;
+let isDraggingScrubber = false;
 let selectedIds = new Set();
 let lastClickedIndex = null;
 let lastRenderedActiveId = undefined;
@@ -48,18 +52,34 @@ function trackSubtitle(t) {
 
 async function refreshFolders() {
   const folders = await invoke("get_library_folders");
-  const list = document.getElementById("folder-list");
-  list.innerHTML = "";
+  renderFolderList(document.getElementById("folder-list"), folders);
+  if (appTier === "pro") renderFolderList(document.getElementById("settings-folder-list"), folders);
+}
+
+function renderFolderList(container, folders) {
+  container.innerHTML = "";
   if (folders.length === 0) {
-    list.innerHTML = `<div class="folder-chip">No folders added yet</div>`;
+    container.innerHTML = `<div class="folder-chip">No folders added yet</div>`;
     return;
   }
   for (const f of folders) {
     const el = document.createElement("div");
     el.className = "folder-chip";
-    el.textContent = f;
     el.title = f;
-    list.appendChild(el);
+    el.innerHTML = `<span class="folder-chip-path">${escapeHtml(f)}</span>`;
+    if (appTier === "pro") {
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "folder-chip-remove";
+      removeBtn.title = "Remove folder and its tracks";
+      removeBtn.textContent = "×";
+      removeBtn.addEventListener("click", async () => {
+        await invoke("remove_library_folder", { path: f });
+        await refreshFolders();
+        await refreshTracks();
+      });
+      el.appendChild(removeBtn);
+    }
+    container.appendChild(el);
   }
 }
 
@@ -98,17 +118,21 @@ function rowTooltipText(t) {
 function renderTrackList() {
   const container = document.getElementById("track-list");
   container.innerHTML = "";
-  displayTracks = viewMode === "foryou" ? forYouTracks : tracks;
+  displayTracks = viewMode === "foryou" ? forYouTracks : viewMode === "playlist" ? playlistTracks : tracks;
 
   if (displayTracks.length === 0) {
+    const emptyMessages = {
+      foryou: `<div class="empty-state">Nothing to recommend yet — play a few tracks first so Resonate can learn your taste.</div>`,
+      playlist: `<div class="empty-state">This playlist is empty. Browse Library and use the + button to add tracks.</div>`,
+    };
     container.innerHTML =
-      viewMode === "foryou"
-        ? `<div class="empty-state">Nothing to recommend yet — play a few tracks first so Resonate can learn your taste.</div>`
-        : `<div class="empty-state">No tracks yet. Add a folder, or drag audio files/folders anywhere in this window.</div>`;
+      emptyMessages[viewMode] ??
+      `<div class="empty-state">No tracks yet. Add a folder, or drag audio files/folders anywhere in this window.</div>`;
     return;
   }
 
   const activeId = nowPlaying?.track?.id;
+  const showPlaylistAdd = appTier === "pro" && activePlaylistId && viewMode !== "playlist";
 
   displayTracks.forEach((t, index) => {
     const row = document.createElement("div");
@@ -122,7 +146,8 @@ function renderTrackList() {
       <span class="row-duration mono">${fmtDuration(t.duration_seconds)}</span>
       <div class="row-actions">
         ${appTier === "pro" ? `<button class="row-similar" title="More like this">&#8776;</button>` : ""}
-        <button class="row-remove" title="Remove from library">&#10005;</button>
+        ${showPlaylistAdd ? `<button class="row-playlist-add" title="Add to playlist">+</button>` : ""}
+        <button class="row-remove" title="${viewMode === "playlist" ? "Remove from playlist" : "Remove from library"}">&#10005;</button>
       </div>
       <div class="row-tooltip">${escapeHtml(rowTooltipText(t))}</div>
     `;
@@ -130,17 +155,34 @@ function renderTrackList() {
     row.addEventListener("click", (e) => handleRowClick(e, t, index));
     row.querySelector(".row-remove").addEventListener("click", (e) => {
       e.stopPropagation();
-      removeTracks([t.id]);
+      if (viewMode === "playlist") {
+        removeFromActivePlaylist(t.id);
+      } else {
+        removeTracks([t.id]);
+      }
     });
     row.querySelector(".row-similar")?.addEventListener("click", (e) => {
       e.stopPropagation();
       showSimilarTracks(t);
+    });
+    row.querySelector(".row-playlist-add")?.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await invoke("add_track_to_playlist", { playlistId: activePlaylistId, trackId: t.id });
+      await refreshPlaylists();
     });
 
     container.appendChild(row);
   });
 
   updateRemoveButtonVisibility();
+}
+
+async function removeFromActivePlaylist(trackId) {
+  if (!activePlaylistId) return;
+  await invoke("remove_track_from_playlist", { playlistId: activePlaylistId, trackId });
+  playlistTracks = await invoke("get_playlist_tracks", { playlistId: activePlaylistId });
+  await refreshPlaylists();
+  renderTrackList();
 }
 
 function handleRowClick(e, track, index) {
@@ -182,6 +224,74 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
   return div.innerHTML;
+}
+
+async function refreshPlaylists() {
+  playlists = await invoke("list_playlists");
+  renderPlaylistChips();
+}
+
+function renderPlaylistChips() {
+  const container = document.getElementById("playlist-chips");
+  container.innerHTML = "";
+  for (const p of playlists) {
+    const chip = document.createElement("button");
+    chip.className = "playlist-chip" + (p.id === activePlaylistId ? " active" : "");
+    chip.innerHTML = `<span>${escapeHtml(p.name)} (${p.track_count})</span><span class="playlist-chip-remove">&#10005;</span>`;
+    chip.addEventListener("click", (e) => {
+      if (e.target.closest(".playlist-chip-remove")) {
+        e.stopPropagation();
+        deletePlaylist(p.id);
+        return;
+      }
+      selectPlaylist(p);
+    });
+    container.appendChild(chip);
+  }
+}
+
+async function selectPlaylist(p) {
+  activePlaylistId = p.id;
+  viewMode = "playlist";
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+  hideSimilarPanel();
+
+  const banner = document.getElementById("playlist-banner");
+  banner.hidden = false;
+  document.getElementById("playlist-banner-text").textContent = `Adding to: ${p.name}`;
+
+  playlistTracks = await invoke("get_playlist_tracks", { playlistId: p.id });
+  renderPlaylistChips();
+  renderTrackList();
+}
+
+async function deletePlaylist(playlistId) {
+  await invoke("delete_playlist", { playlistId });
+  if (activePlaylistId === playlistId) {
+    clearActivePlaylist();
+  }
+  await refreshPlaylists();
+}
+
+function clearActivePlaylist() {
+  activePlaylistId = null;
+  document.getElementById("playlist-banner").hidden = true;
+  if (viewMode === "playlist") {
+    viewMode = "library";
+    document.querySelector('.tab-btn[data-view="library"]').classList.add("active");
+  }
+  renderPlaylistChips();
+  renderTrackList();
+}
+
+function setupPlaylists() {
+  document.getElementById("new-playlist-btn").addEventListener("click", async () => {
+    const name = window.prompt("Playlist name:");
+    if (!name || !name.trim()) return;
+    await invoke("create_playlist", { name: name.trim() });
+    await refreshPlaylists();
+  });
+  document.getElementById("playlist-banner-clear").addEventListener("click", clearActivePlaylist);
 }
 
 function setupViewTabs() {
@@ -273,6 +383,56 @@ async function setVolume(value) {
   await invoke("set_volume", { volume: value / 100 });
 }
 
+function setScrubberVisual(pct) {
+  document.getElementById("scrubber-fill").style.width = `${pct}%`;
+  document.getElementById("scrubber-thumb").style.left = `${pct}%`;
+}
+
+function setupScrubber() {
+  const track = document.getElementById("scrubber-track");
+
+  function ratioFromEvent(e) {
+    const rect = track.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  }
+
+  function currentDuration() {
+    return nowPlaying?.track?.duration_seconds ?? 0;
+  }
+
+  track.addEventListener("mousedown", (e) => {
+    const duration = currentDuration();
+    if (!(duration > 0)) return; // nothing seekable (nothing playing, or a live stream)
+    isDraggingScrubber = true;
+    track.classList.add("dragging");
+    const ratio = ratioFromEvent(e);
+    setScrubberVisual(ratio * 100);
+    document.getElementById("time-current").textContent = fmtTime(ratio * duration);
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!isDraggingScrubber) return;
+    const duration = currentDuration();
+    const ratio = ratioFromEvent(e);
+    setScrubberVisual(ratio * 100);
+    document.getElementById("time-current").textContent = fmtTime(ratio * duration);
+  });
+
+  window.addEventListener("mouseup", async (e) => {
+    if (!isDraggingScrubber) return;
+    isDraggingScrubber = false;
+    track.classList.remove("dragging");
+    const duration = currentDuration();
+    const ratio = ratioFromEvent(e);
+    try {
+      await invoke("seek_to", { positionSeconds: ratio * duration });
+    } catch (err) {
+      console.error("seek_to failed", err);
+    }
+    await pollNowPlaying();
+  });
+}
+
 function renderNowPlaying(state) {
   nowPlaying = state;
 
@@ -282,7 +442,6 @@ function renderNowPlaying(state) {
   const vu = document.getElementById("vu-meter");
   const currentEl = document.getElementById("time-current");
   const totalEl = document.getElementById("time-total");
-  const fillEl = document.getElementById("scrubber-fill");
   const volumeSlider = document.getElementById("volume-slider");
 
   const titlebarTitleEl = document.getElementById("titlebar-title");
@@ -306,10 +465,12 @@ function renderNowPlaying(state) {
   vu.classList.toggle("playing", state.is_playing);
 
   const duration = state.track?.duration_seconds ?? 0;
-  currentEl.textContent = fmtTime(state.position_seconds);
   totalEl.textContent = fmtDuration(duration);
-  const pct = duration > 0 ? Math.min(100, (state.position_seconds / duration) * 100) : 0;
-  fillEl.style.width = `${pct}%`;
+  if (!isDraggingScrubber) {
+    currentEl.textContent = fmtTime(state.position_seconds);
+    const pct = duration > 0 ? Math.min(100, (state.position_seconds / duration) * 100) : 0;
+    setScrubberVisual(pct);
+  }
 
   if (!isSeeking && document.activeElement !== volumeSlider) {
     volumeSlider.value = Math.round(state.volume * 100);
@@ -464,6 +625,47 @@ function setupWindowControls() {
   document.getElementById("win-close").addEventListener("click", () => win.close());
 }
 
+function setupSettings() {
+  const settingsBtn = document.getElementById("settings-btn");
+  const modal = document.getElementById("settings-modal");
+
+  settingsBtn.addEventListener("click", async () => {
+    if (appTier !== "pro") return;
+    modal.hidden = false;
+    await refreshFolders();
+    await refreshOutputDevices();
+  });
+  document.getElementById("settings-close-btn").addEventListener("click", () => {
+    modal.hidden = true;
+  });
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.hidden = true;
+  });
+
+  document.getElementById("output-device-select").addEventListener("change", async (e) => {
+    try {
+      await invoke("set_output_device", { deviceName: e.target.value });
+    } catch (err) {
+      console.error("set_output_device failed", err);
+    }
+  });
+}
+
+async function refreshOutputDevices() {
+  const select = document.getElementById("output-device-select");
+  try {
+    const [devices, current] = await Promise.all([
+      invoke("list_output_devices"),
+      invoke("get_current_output_device"),
+    ]);
+    select.innerHTML = devices
+      .map((d) => `<option value="${escapeHtml(d)}" ${d === current ? "selected" : ""}>${escapeHtml(d)}</option>`)
+      .join("");
+  } catch (e) {
+    console.error("failed to load output devices", e);
+  }
+}
+
 let savedWindowRect = null;
 let isMini = false;
 
@@ -567,7 +769,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupMiniMode();
   setupDragAndDrop();
   setupStreamPanel();
+  setupScrubber();
   setupViewTabs();
+  setupSettings();
+  setupPlaylists();
   document.getElementById("similar-close-btn").addEventListener("click", hideSimilarPanel);
 
   try {
@@ -578,7 +783,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.body.dataset.tier = appTier;
   if (appTier === "pro") {
     document.getElementById("foryou-tab").hidden = false;
+    document.getElementById("playlists-section").hidden = false;
     setInterval(refreshTrackTags, 5000);
+    await refreshPlaylists();
+  } else {
+    document.getElementById("settings-btn").hidden = true;
   }
 
   await refreshFolders();

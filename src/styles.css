@@ -18,6 +18,14 @@
   box-sizing: border-box;
 }
 
+/* The `hidden` attribute must always win over a class's own `display`
+   property (e.g. `.modal-overlay { display: flex }` toggled via `hidden`) —
+   without `!important` here, author rules of equal-or-higher specificity
+   silently defeat `[hidden]`'s UA-stylesheet `display: none`. */
+[hidden] {
+  display: none !important;
+}
+
 /* ---------- Themed scrollbars ---------- */
 
 * {
@@ -436,12 +444,128 @@ body {
 }
 
 .folder-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   font-size: 0.72rem;
   color: var(--text-faint);
   font-family: var(--font-mono);
+}
+
+.folder-chip .folder-chip-path {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.folder-chip-remove {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 0.65rem;
+  cursor: pointer;
+}
+
+.folder-chip-remove:hover {
+  background: #b3452f;
+  color: #fff;
+}
+
+/* ---------- Playlists ---------- */
+
+.playlists-section {
+  padding: 8px 18px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.playlists-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.playlists-header .btn-ghost {
+  font-size: 0.66rem;
+  padding: 2px 7px;
+}
+
+.playlist-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.playlist-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.playlist-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.playlist-chip .playlist-chip-remove {
+  color: var(--text-faint);
+  font-size: 0.6rem;
+}
+
+.playlist-chip.active .playlist-chip-remove {
+  color: var(--accent);
+}
+
+.playlist-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 8px 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elevated-2));
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.playlist-banner .btn-ghost {
+  font-size: 0.65rem;
+  padding: 2px 8px;
+}
+
+.row-playlist-add {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.row-playlist-add:hover {
+  background: var(--bg-elevated);
+  color: var(--accent);
 }
 
 .track-list-wrap {
@@ -793,14 +917,43 @@ body {
   height: 4px;
   border-radius: 2px;
   background: var(--line);
-  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+  padding: 8px 0;
+  margin: -8px 0;
+  background-clip: content-box;
 }
 
 .scrubber-fill {
-  height: 100%;
+  height: 4px;
   width: 0%;
   background: var(--accent);
+  border-radius: 2px;
   transition: width 0.4s linear;
+  pointer-events: none;
+}
+
+.scrubber-track.dragging .scrubber-fill {
+  transition: none;
+}
+
+.scrubber-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.scrubber-track:hover .scrubber-thumb,
+.scrubber-track.dragging .scrubber-thumb {
+  opacity: 1;
 }
 
 .transport {
@@ -874,4 +1027,59 @@ body {
 .control-strip-right {
   display: flex;
   gap: 8px;
+}
+
+/* ---------- Settings modal ---------- */
+
+.modal-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(14, 12, 10, 0.75);
+}
+
+.modal-panel {
+  width: 320px;
+  max-height: 70%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.7);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.modal-section-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+}
+
+.settings-folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 140px;
+  overflow-y: auto;
 }

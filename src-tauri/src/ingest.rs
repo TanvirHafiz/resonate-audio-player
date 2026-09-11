@@ -77,14 +77,21 @@ fn is_audio_file(path: &Path) -> bool {
 
 fn insert_if_new(conn: &rusqlite::Connection, path: &Path) -> Result<Option<i64>, String> {
     let file_path = path.to_string_lossy().to_string();
-    let exists: bool = conn
+    let existing: Option<(i64, i64)> = conn
         .query_row(
-            "SELECT 1 FROM tracks WHERE file_path = ?1",
+            "SELECT id, in_library FROM tracks WHERE file_path = ?1",
             params![file_path],
-            |_| Ok(true),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .unwrap_or(false);
-    if exists {
+        .ok();
+    if let Some((id, in_library)) = existing {
+        if in_library == 0 {
+            // Was removed from the library but kept alive by a playlist;
+            // re-adding the same file/folder should bring it back.
+            conn.execute("UPDATE tracks SET in_library = 1 WHERE id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+            return Ok(Some(id));
+        }
         return Ok(None);
     }
 
@@ -179,11 +186,18 @@ pub fn add_stream(
 ) -> Result<i64, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
-    if let Ok(existing_id) = conn.query_row(
-        "SELECT id FROM tracks WHERE stream_url = ?1",
+    if let Ok((existing_id, in_library)) = conn.query_row(
+        "SELECT id, in_library FROM tracks WHERE stream_url = ?1",
         params![url],
-        |row| row.get::<_, i64>(0),
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
     ) {
+        if in_library == 0 {
+            conn.execute(
+                "UPDATE tracks SET in_library = 1 WHERE id = ?1",
+                params![existing_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
         return Ok(existing_id);
     }
 
@@ -198,15 +212,29 @@ pub fn add_stream(
     Ok(conn.last_insert_rowid())
 }
 
-/// Removes tracks (and their derived rows, via ON DELETE CASCADE) from the
-/// library. Does not touch the underlying files on disk.
+/// Removes tracks from the library. A track still referenced by a playlist
+/// is only hidden from the library (its row, file reference, and history
+/// stay intact so the playlist keeps it and can still play it) — it's
+/// fully deleted only once no playlist references it anymore. Does not
+/// touch underlying files on disk either way.
 pub fn remove_tracks(db: &Db, track_ids: &[i64]) -> Result<usize, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut removed = 0usize;
     for id in track_ids {
-        removed += conn
-            .execute("DELETE FROM tracks WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
+        let in_playlist: bool = conn
+            .query_row(
+                "SELECT 1 FROM playlist_tracks WHERE track_id = ?1 LIMIT 1",
+                params![id],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+
+        let sql = if in_playlist {
+            "UPDATE tracks SET in_library = 0 WHERE id = ?1"
+        } else {
+            "DELETE FROM tracks WHERE id = ?1"
+        };
+        removed += conn.execute(sql, params![id]).map_err(|e| e.to_string())?;
     }
     Ok(removed)
 }

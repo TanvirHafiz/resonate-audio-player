@@ -49,6 +49,7 @@ pub fn run() {
             api::next_track,
             api::previous_track,
             api::set_volume,
+            api::seek_to,
             api::get_now_playing,
             api::debug_log,
             api::app_tier,
@@ -62,6 +63,28 @@ pub fn run() {
             pro::api::is_track_analyzed,
             #[cfg(feature = "pro")]
             pro::api::requeue_unanalyzed_tracks,
+            #[cfg(feature = "pro")]
+            pro::api::create_playlist,
+            #[cfg(feature = "pro")]
+            pro::api::rename_playlist,
+            #[cfg(feature = "pro")]
+            pro::api::delete_playlist,
+            #[cfg(feature = "pro")]
+            pro::api::list_playlists,
+            #[cfg(feature = "pro")]
+            pro::api::get_playlist_tracks,
+            #[cfg(feature = "pro")]
+            pro::api::add_track_to_playlist,
+            #[cfg(feature = "pro")]
+            pro::api::remove_track_from_playlist,
+            #[cfg(feature = "pro")]
+            pro::api::remove_library_folder,
+            #[cfg(feature = "pro")]
+            pro::api::list_output_devices,
+            #[cfg(feature = "pro")]
+            pro::api::get_current_output_device,
+            #[cfg(feature = "pro")]
+            pro::api::set_output_device,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -8,5 +8,7 @@ pub mod affinity_engine;
 pub mod api;
 pub mod feature_extraction;
 pub mod mood_tagging;
+pub mod playlists;
 pub mod recommendation_engine;
+pub mod settings;
 pub mod worker;
