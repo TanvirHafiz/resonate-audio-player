@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Resonate</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,400;0,600;1,500&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="/main.js" defer></script>
+  </head>
+
+  <body>
+    <div class="window" id="window">
+      <div class="titlebar" data-tauri-drag-region="deep">
+        <span class="titlebar-title" id="titlebar-title">Resonate</span>
+        <div class="window-controls">
+          <button id="mini-toggle-btn" class="win-btn" title="Mini player">&#10064;</button>
+          <button id="win-minimize" class="win-btn" title="Minimize">&#8722;</button>
+          <button id="win-close" class="win-btn win-btn-close" title="Close">&#10005;</button>
+        </div>
+      </div>
+
+      <div class="mini-bar" id="mini-bar" data-tauri-drag-region="deep" hidden>
+        <span class="mini-title" id="mini-title">Nothing playing</span>
+        <div class="mini-controls">
+          <button id="mini-prev-btn" class="mini-btn" title="Previous">⏮</button>
+          <button id="mini-play-btn" class="mini-btn" title="Play/Pause">▶</button>
+          <button id="mini-next-btn" class="mini-btn" title="Next">⏭</button>
+          <button id="mini-restore-btn" class="mini-btn" title="Restore">&#10063;</button>
+        </div>
+      </div>
+
+      <div class="app" id="app">
+      <div class="ambient-glow" id="ambient-glow"></div>
+      <div class="drop-overlay" id="drop-overlay">
+        <div class="drop-overlay-inner">Drop to add to library</div>
+      </div>
+
+      <aside class="library-pane">
+        <div class="library-header">
+          <span class="brand">Resonate</span>
+          <div class="header-actions">
+            <button id="add-folder-btn" class="btn-ghost" title="Add music folder">+ Folder</button>
+            <button id="add-stream-btn" class="btn-ghost" title="Add radio, podcast, or URL">+ Stream</button>
+          </div>
+        </div>
+
+        <div class="stream-panel" id="stream-panel" hidden>
+          <div class="stream-panel-header">
+            <div class="type-toggle" id="stream-type-toggle">
+              <button class="type-btn active" data-type="radio">Radio</button>
+              <button class="type-btn" data-type="podcast">Podcast</button>
+              <button class="type-btn" data-type="url">URL</button>
+            </div>
+            <button class="btn-ghost stream-close" id="stream-close-btn" title="Close">&#10005;</button>
+          </div>
+
+          <input type="text" id="stream-url" class="stream-input" placeholder="https://..." />
+          <input type="text" id="stream-title" class="stream-input" placeholder="Title (optional)" />
+
+          <button id="stream-fetch-btn" class="btn-ghost stream-action" hidden>Fetch episodes</button>
+          <button id="stream-add-btn" class="btn-ghost stream-action">Add</button>
+
+          <div class="episode-list" id="episode-list" hidden></div>
+        </div>
+
+        <div class="folder-list" id="folder-list"></div>
+
+        <div class="track-list-wrap">
+          <div class="track-list-label-row">
+            <span class="track-list-label">Library</span>
+            <button id="remove-selected-btn" class="btn-ghost remove-selected-btn" title="Remove selected from library">Remove</button>
+          </div>
+          <div class="track-list" id="track-list">
+            <div class="empty-state">No tracks yet. Add a folder, or drag audio files/folders anywhere in this window.</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="deck">
+        <div class="deck-inner">
+          <div class="art" id="art">
+            <div class="art-placeholder">♪</div>
+          </div>
+
+          <div class="now-playing-meta">
+            <div class="track-title" id="np-title">Nothing playing</div>
+            <div class="track-sub" id="np-sub">Pick a track from your library</div>
+          </div>
+
+          <div class="vu-meter" id="vu-meter">
+            <span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+
+          <div class="scrubber-row">
+            <span class="time mono" id="time-current">0:00</span>
+            <div class="scrubber-track">
+              <div class="scrubber-fill" id="scrubber-fill"></div>
+            </div>
+            <span class="time mono" id="time-total">0:00</span>
+          </div>
+
+          <div class="transport">
+            <button id="prev-btn" class="transport-btn" title="Previous">⏮</button>
+            <button id="play-btn" class="transport-btn primary" title="Play/Pause">▶</button>
+            <button id="next-btn" class="transport-btn" title="Next">⏭</button>
+          </div>
+        </div>
+
+        <div class="control-strip">
+          <div class="volume-control">
+            <span class="mono label">VOL</span>
+            <input type="range" id="volume-slider" min="0" max="100" value="80" />
+          </div>
+          <div class="control-strip-right">
+            <button class="btn-ghost" id="output-btn" title="Output device (coming soon)">Output</button>
+            <button class="btn-ghost" id="eq-btn" title="Equalizer (coming soon)">EQ</button>
+          </div>
+        </div>
+      </main>
+      </div>
+    </div>
+  </body>
+</html>
