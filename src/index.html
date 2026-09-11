@@ -159,7 +159,6 @@
           </div>
           <div class="control-strip-right">
             <button class="btn-ghost" id="settings-btn" title="Settings">Settings</button>
-            <button class="btn-ghost" id="eq-btn" title="Equalizer (coming soon)">EQ</button>
           </div>
         </div>
       </main>
@@ -179,6 +178,22 @@
           <div class="modal-section">
             <div class="modal-section-label">Audio Output</div>
             <select class="stream-input" id="output-device-select"></select>
+          </div>
+
+          <div class="modal-section">
+            <div class="modal-section-label">Equalizer</div>
+            <select class="stream-input" id="eq-preset-select"></select>
+          </div>
+
+          <div class="modal-section">
+            <div class="modal-section-label">Theme</div>
+            <div class="theme-swatch-row" id="theme-swatch-row">
+              <button class="theme-swatch theme-swatch-living" data-theme="living" title="Living (mood-reactive)"></button>
+              <button class="theme-swatch" data-theme="noir" title="Noir"></button>
+              <button class="theme-swatch" data-theme="copper" title="Copper"></button>
+              <button class="theme-swatch" data-theme="verdant" title="Verdant"></button>
+              <button class="theme-swatch" data-theme="slate" title="Slate"></button>
+            </div>
           </div>
         </div>
       </div>

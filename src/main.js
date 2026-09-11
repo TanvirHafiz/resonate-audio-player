@@ -103,6 +103,7 @@ async function refreshTrackTags() {
     }
     updateMoodFilterOptions(moods);
     renderTrackList();
+    applyLivingMoodColor(nowPlaying?.track);
   } catch (e) {
     console.error("get_all_track_tags failed", e);
   }
@@ -537,6 +538,7 @@ function renderNowPlaying(state) {
   if (activeId !== lastRenderedActiveId) {
     lastRenderedActiveId = activeId;
     renderTrackList();
+    applyLivingMoodColor(state.track);
   }
 }
 
@@ -683,15 +685,17 @@ function setupWindowControls() {
 }
 
 function setupSettings() {
-  const settingsBtn = document.getElementById("settings-btn");
   const modal = document.getElementById("settings-modal");
 
-  settingsBtn.addEventListener("click", async () => {
+  async function openSettings() {
     if (appTier !== "pro") return;
     modal.hidden = false;
     await refreshFolders();
     await refreshOutputDevices();
-  });
+    await refreshEqPresets();
+  }
+
+  document.getElementById("settings-btn").addEventListener("click", openSettings);
   document.getElementById("settings-close-btn").addEventListener("click", () => {
     modal.hidden = true;
   });
@@ -706,6 +710,86 @@ function setupSettings() {
       console.error("set_output_device failed", err);
     }
   });
+
+  document.getElementById("eq-preset-select").addEventListener("change", async (e) => {
+    try {
+      await invoke("set_eq_preset", { name: e.target.value });
+    } catch (err) {
+      console.error("set_eq_preset failed", err);
+    }
+  });
+}
+
+async function refreshEqPresets() {
+  const select = document.getElementById("eq-preset-select");
+  try {
+    const [presets, current] = await Promise.all([
+      invoke("list_eq_presets"),
+      invoke("get_current_eq_preset"),
+    ]);
+    select.innerHTML = presets
+      .map((p) => `<option value="${escapeHtml(p)}" ${p === current ? "selected" : ""}>${escapeHtml(p)}</option>`)
+      .join("");
+  } catch (e) {
+    console.error("failed to load eq presets", e);
+  }
+}
+
+// ---------- Theme ----------
+
+let currentTheme = "living";
+
+const MOOD_GLOW_COLORS = {
+  Energetic: ["#f2b46a", "#e0913f"],
+  Driving: ["#ff8a4c", "#c1272d"],
+  Warm: ["#e8b978", "#b3452f"],
+  Chill: ["#4fb0a8", "#2f6f6b"],
+  Melancholic: ["#6a7bb3", "#33356e"],
+  Acoustic: ["#b08a5a", "#5c4a2e"],
+  Balanced: ["#e0913f", "#b3452f"],
+};
+
+function applyLivingMoodColor(track) {
+  if (currentTheme !== "living" || appTier !== "pro" || !track) return;
+  const mood = trackTags[track.id]?.mood?.[0];
+  const [a, b] = MOOD_GLOW_COLORS[mood] ?? MOOD_GLOW_COLORS.Balanced;
+  document.documentElement.style.setProperty("--mood-a", a);
+  document.documentElement.style.setProperty("--mood-b", b);
+}
+
+function applyTheme(name) {
+  currentTheme = name;
+  if (name === "living") {
+    document.documentElement.removeAttribute("data-theme");
+    applyLivingMoodColor(nowPlaying?.track);
+  } else {
+    document.documentElement.setAttribute("data-theme", name);
+    document.documentElement.style.removeProperty("--mood-a");
+    document.documentElement.style.removeProperty("--mood-b");
+  }
+  document.querySelectorAll(".theme-swatch").forEach((el) => {
+    el.classList.toggle("active", el.dataset.theme === name);
+  });
+  try {
+    localStorage.setItem("resonate-theme", name);
+  } catch {
+    // ignore — private browsing / storage disabled
+  }
+}
+
+function setupThemes() {
+  document.getElementById("theme-swatch-row").addEventListener("click", (e) => {
+    const btn = e.target.closest(".theme-swatch");
+    if (btn) applyTheme(btn.dataset.theme);
+  });
+
+  let saved = "living";
+  try {
+    saved = localStorage.getItem("resonate-theme") || "living";
+  } catch {
+    // ignore
+  }
+  applyTheme(saved);
 }
 
 async function refreshOutputDevices() {
@@ -939,6 +1023,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("enrichment-row").hidden = false;
     setInterval(refreshTrackTags, 5000);
     await refreshPlaylists();
+    setupThemes();
   } else {
     document.getElementById("settings-btn").hidden = true;
     setupUpsell();

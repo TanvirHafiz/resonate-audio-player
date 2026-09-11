@@ -185,6 +185,23 @@ pub fn set_output_device(player: State<Player>, device_name: String) -> Result<(
     playback::set_output_device(&player, &device_name)
 }
 
+// ---------- Equalizer ----------
+
+#[tauri::command]
+pub fn list_eq_presets() -> Vec<&'static str> {
+    playback::eq_preset_names()
+}
+
+#[tauri::command]
+pub fn get_current_eq_preset(player: State<Player>) -> String {
+    playback::current_eq_preset(&player)
+}
+
+#[tauri::command]
+pub fn set_eq_preset(player: State<Player>, name: String) {
+    playback::set_eq_preset(&player, &name);
+}
+
 // ---------- Enrichment (lyrics / artist bio) ----------
 
 #[tauri::command]

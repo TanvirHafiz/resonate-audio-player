@@ -1,5 +1,6 @@
 mod api;
 mod db;
+mod eq;
 mod history;
 mod ingest;
 mod models;
@@ -85,6 +86,12 @@ pub fn run() {
             pro::api::get_current_output_device,
             #[cfg(feature = "pro")]
             pro::api::set_output_device,
+            #[cfg(feature = "pro")]
+            pro::api::list_eq_presets,
+            #[cfg(feature = "pro")]
+            pro::api::get_current_eq_preset,
+            #[cfg(feature = "pro")]
+            pro::api::set_eq_preset,
             #[cfg(feature = "pro")]
             pro::api::fetch_lyrics,
             #[cfg(feature = "pro")]

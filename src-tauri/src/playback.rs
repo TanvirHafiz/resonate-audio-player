@@ -1,3 +1,4 @@
+use crate::eq::{EqHandle, EqSource};
 use crate::streaming::StreamReader;
 use rodio::cpal;
 use rodio::cpal::traits::{DeviceTrait, HostTrait};
@@ -16,6 +17,7 @@ pub struct PlaybackState {
     pub is_playing: bool,
     session_id: i64,
     device_name: String,
+    eq: EqHandle,
 }
 
 pub struct Player(pub Mutex<PlaybackState>);
@@ -41,8 +43,26 @@ impl Player {
             is_playing: false,
             session_id,
             device_name,
+            eq: EqHandle::new(),
         }))
     }
+}
+
+/// Names of the built-in EQ presets ("Flat", "Rock", "Disco", ...), used by
+/// the pro-tier settings panel.
+pub fn eq_preset_names() -> Vec<&'static str> {
+    crate::eq::preset_names()
+}
+
+pub fn current_eq_preset(player: &Player) -> String {
+    player.0.lock().unwrap().eq.current_preset()
+}
+
+/// Applies an EQ preset by name, live — takes effect on whatever's playing
+/// right now as well as anything played next (the handle is shared with
+/// the currently-loaded `EqSource`, if any).
+pub fn set_eq_preset(player: &Player, name: &str) {
+    player.0.lock().unwrap().eq.set_preset(name);
 }
 
 /// Lists the names of available audio output devices (used by the
@@ -118,6 +138,7 @@ pub fn play_file(player: &Player, file_path: &str) -> Result<(), String> {
     let source = Decoder::new(BufReader::new(file)).map_err(|e| e.to_string())?;
 
     let mut state = player.0.lock().unwrap();
+    let source = EqSource::new(source, state.eq.clone());
     start_source(&mut state, source);
     Ok(())
 }
@@ -130,6 +151,7 @@ pub fn play_stream(player: &Player, url: &str) -> Result<(), String> {
     let source = Decoder::new(reader).map_err(|e| e.to_string())?;
 
     let mut state = player.0.lock().unwrap();
+    let source = EqSource::new(source, state.eq.clone());
     start_source(&mut state, source);
     Ok(())
 }

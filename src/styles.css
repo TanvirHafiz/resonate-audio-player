@@ -14,6 +14,34 @@
   --font-sans: "Inter", -apple-system, "Segoe UI", sans-serif;
 }
 
+/* Static theme presets (see plan.md 7.2). "Living" (the default, no
+   data-theme attribute) instead gets --mood-a/--mood-b set inline by JS,
+   driven by the currently playing track's mood — see applyLivingMoodColor
+   in main.js. Static themes intentionally don't react to mood. */
+:root[data-theme="noir"] {
+  --accent: #b8b0a6;
+  --mood-a: #3a3a3a;
+  --mood-b: #1c1c1c;
+}
+
+:root[data-theme="copper"] {
+  --accent: #c97b3d;
+  --mood-a: #c97b3d;
+  --mood-b: #7a4620;
+}
+
+:root[data-theme="verdant"] {
+  --accent: #4a9d6f;
+  --mood-a: #4a9d6f;
+  --mood-b: #245038;
+}
+
+:root[data-theme="slate"] {
+  --accent: #5c7ba3;
+  --mood-a: #5c7ba3;
+  --mood-b: #2c3c52;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1156,4 +1184,41 @@ body {
   text-align: center;
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* ---------- Theme swatches ---------- */
+
+.theme-swatch-row {
+  display: flex;
+  gap: 10px;
+}
+
+.theme-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  cursor: pointer;
+  padding: 0;
+  background: var(--swatch-color, var(--bg-elevated-2));
+}
+
+.theme-swatch[data-theme="noir"] {
+  --swatch-color: #3a3a3a;
+}
+.theme-swatch[data-theme="copper"] {
+  --swatch-color: #c97b3d;
+}
+.theme-swatch[data-theme="verdant"] {
+  --swatch-color: #4a9d6f;
+}
+.theme-swatch[data-theme="slate"] {
+  --swatch-color: #5c7ba3;
+}
+.theme-swatch-living {
+  background: linear-gradient(135deg, #e0913f, #b3452f, #5c7ba3);
+}
+
+.theme-swatch.active {
+  border-color: var(--text);
 }
