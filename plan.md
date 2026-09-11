@@ -206,3 +206,5 @@ All presets share the same layout, typography, and motion language — only the 
 - **Library search bar** — basic substring search over title/artist/album, in addition to filtering by mood tag (pro tier, since mood tags only exist there)
 - **Lyrics fetcher, YouTube link, artist bio** buttons on the now-playing view (external metadata lookups; not tied to a specific phase — build after Phase 3 core intelligence work)
 - Multi-output audio routing (deferred from Phase 2 — see section 8)
+- **App icon** — currently the default Tauri scaffold icon; needs real branded icon art (window/taskbar icon, installer icon) matching the "Living Hi-Fi" aesthetic
+- **Free-tier upsell in titlebar** — persistent "Free mode · click here for full version features" text in the titlebar (free build only), opening a popup listing pro-tier features plus a link to get the full version (link destination TBD)
