@@ -5,9 +5,11 @@ use crate::models::{NowPlaying, Track};
 use crate::playback::{self, Player};
 use crate::streaming::{self, PodcastEpisode};
 use rusqlite::params;
+#[cfg(feature = "pro")]
+use tauri::Manager;
 use tauri::State;
 
-fn track_from_row(row: &rusqlite::Row) -> rusqlite::Result<Track> {
+pub(crate) fn track_from_row(row: &rusqlite::Row) -> rusqlite::Result<Track> {
     Ok(Track {
         id: row.get(0)?,
         file_path: row.get(1)?,
@@ -21,17 +23,29 @@ fn track_from_row(row: &rusqlite::Row) -> rusqlite::Result<Track> {
     })
 }
 
-const TRACK_COLUMNS: &str =
+pub(crate) const TRACK_COLUMNS: &str =
     "id, file_path, stream_url, title, artist, album, year, duration_seconds, source_type";
 
-#[tauri::command]
-pub fn scan_folder(db: State<Db>, folder: String) -> Result<usize, String> {
-    ingest::scan_folder(&db, &folder)
+#[allow(unused_variables)]
+fn enqueue_for_analysis(app: &tauri::AppHandle, track_ids: &[i64]) {
+    #[cfg(feature = "pro")]
+    if let Some(queue) = app.try_state::<crate::pro::worker::FeatureQueue>() {
+        queue.enqueue_all(track_ids.iter().copied());
+    }
 }
 
 #[tauri::command]
-pub fn add_files(db: State<Db>, paths: Vec<String>) -> Result<usize, String> {
-    ingest::add_paths(&db, &paths)
+pub fn scan_folder(app: tauri::AppHandle, db: State<Db>, folder: String) -> Result<usize, String> {
+    let ids = ingest::scan_folder(&db, &folder)?;
+    enqueue_for_analysis(&app, &ids);
+    Ok(ids.len())
+}
+
+#[tauri::command]
+pub fn add_files(app: tauri::AppHandle, db: State<Db>, paths: Vec<String>) -> Result<usize, String> {
+    let ids = ingest::add_paths(&db, &paths)?;
+    enqueue_for_analysis(&app, &ids);
+    Ok(ids.len())
 }
 
 #[tauri::command]
@@ -131,7 +145,15 @@ pub fn record_history_for_current(db: &Db, player: &Player) -> Result<(), String
         return Ok(());
     };
     let position = playback::position_seconds(player);
-    history::record(db, track_id, position, playback::session_id(player))
+    history::record(db, track_id, position, playback::session_id(player))?;
+
+    #[cfg(feature = "pro")]
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        crate::pro::affinity_engine::recompute(&conn)?;
+    }
+
+    Ok(())
 }
 
 /// Plays `track_id`, setting the full visible track list as the queue

@@ -14,6 +14,10 @@ const MINI_MARGIN = 24;
 let appTier = "free";
 
 let tracks = [];
+let forYouTracks = [];
+let displayTracks = [];
+let viewMode = "library"; // "library" | "foryou"
+let trackTags = {}; // { [track_id]: { mood: string[], genre: string[] } }
 let nowPlaying = null;
 let pollHandle = null;
 let isSeeking = false;
@@ -62,20 +66,51 @@ async function refreshFolders() {
 async function refreshTracks() {
   tracks = await invoke("get_tracks");
   renderTrackList();
+  if (appTier === "pro") refreshTrackTags();
+}
+
+async function refreshTrackTags() {
+  try {
+    const rows = await invoke("get_all_track_tags");
+    trackTags = {};
+    for (const r of rows) trackTags[r.track_id] = { mood: r.mood, genre: r.genre };
+    renderTrackList();
+  } catch (e) {
+    console.error("get_all_track_tags failed", e);
+  }
+}
+
+function moodBadge(t) {
+  if (appTier !== "pro") return "";
+  const mood = trackTags[t.id]?.mood?.[0];
+  return mood ? `<span class="mood-badge">${escapeHtml(mood)}</span>` : "";
+}
+
+function rowTooltipText(t) {
+  let text = trackSubtitle(t);
+  const tags = trackTags[t.id];
+  if (appTier === "pro" && tags && (tags.mood.length || tags.genre.length)) {
+    text += ` · ${[...tags.genre, ...tags.mood].join(", ")}`;
+  }
+  return text;
 }
 
 function renderTrackList() {
   const container = document.getElementById("track-list");
   container.innerHTML = "";
+  displayTracks = viewMode === "foryou" ? forYouTracks : tracks;
 
-  if (tracks.length === 0) {
-    container.innerHTML = `<div class="empty-state">No tracks yet. Add a folder, or drag audio files/folders anywhere in this window.</div>`;
+  if (displayTracks.length === 0) {
+    container.innerHTML =
+      viewMode === "foryou"
+        ? `<div class="empty-state">Nothing to recommend yet — play a few tracks first so Resonate can learn your taste.</div>`
+        : `<div class="empty-state">No tracks yet. Add a folder, or drag audio files/folders anywhere in this window.</div>`;
     return;
   }
 
   const activeId = nowPlaying?.track?.id;
 
-  tracks.forEach((t, index) => {
+  displayTracks.forEach((t, index) => {
     const row = document.createElement("div");
     const classes = ["track-row"];
     if (t.id === activeId) classes.push("active");
@@ -83,15 +118,23 @@ function renderTrackList() {
     row.className = classes.join(" ");
     row.innerHTML = `
       <span class="row-title">${escapeHtml(t.title)}</span>
+      ${moodBadge(t)}
       <span class="row-duration mono">${fmtDuration(t.duration_seconds)}</span>
-      <button class="row-remove" title="Remove from library">&#10005;</button>
-      <div class="row-tooltip">${escapeHtml(trackSubtitle(t))}</div>
+      <div class="row-actions">
+        ${appTier === "pro" ? `<button class="row-similar" title="More like this">&#8776;</button>` : ""}
+        <button class="row-remove" title="Remove from library">&#10005;</button>
+      </div>
+      <div class="row-tooltip">${escapeHtml(rowTooltipText(t))}</div>
     `;
 
     row.addEventListener("click", (e) => handleRowClick(e, t, index));
     row.querySelector(".row-remove").addEventListener("click", (e) => {
       e.stopPropagation();
       removeTracks([t.id]);
+    });
+    row.querySelector(".row-similar")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showSimilarTracks(t);
     });
 
     container.appendChild(row);
@@ -114,7 +157,7 @@ function handleRowClick(e, track, index) {
 
   if (e.shiftKey && lastClickedIndex !== null) {
     const [start, end] = [lastClickedIndex, index].sort((a, b) => a - b);
-    selectedIds = new Set(tracks.slice(start, end + 1).map((t) => t.id));
+    selectedIds = new Set(displayTracks.slice(start, end + 1).map((t) => t.id));
     renderTrackList();
     return;
   }
@@ -139,6 +182,65 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
   return div.innerHTML;
+}
+
+function setupViewTabs() {
+  document.getElementById("view-tabs").addEventListener("click", async (e) => {
+    const btn = e.target.closest(".tab-btn");
+    if (!btn || btn.hidden) return;
+    viewMode = btn.dataset.view;
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    hideSimilarPanel();
+
+    if (viewMode === "foryou") {
+      try {
+        forYouTracks = await invoke("for_you_queue", { limit: 40 });
+      } catch (e) {
+        console.error("for_you_queue failed", e);
+        forYouTracks = [];
+      }
+    }
+    renderTrackList();
+  });
+}
+
+function hideSimilarPanel() {
+  document.getElementById("similar-panel").hidden = true;
+}
+
+async function showSimilarTracks(seedTrack) {
+  const panel = document.getElementById("similar-panel");
+  const titleEl = document.getElementById("similar-title");
+  const listEl = document.getElementById("similar-list");
+
+  panel.hidden = false;
+  titleEl.textContent = `Similar to ${seedTrack.title}`;
+  listEl.innerHTML = `<div class="empty-state">Finding similar tracks…</div>`;
+
+  let results = [];
+  try {
+    results = await invoke("more_like_this", { trackId: seedTrack.id, limit: 8 });
+  } catch (e) {
+    console.error("more_like_this failed", e);
+  }
+
+  if (results.length === 0) {
+    listEl.innerHTML = `<div class="empty-state">No similar tracks found yet.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = "";
+  for (const t of results) {
+    const row = document.createElement("div");
+    row.className = "track-row";
+    row.innerHTML = `
+      <span class="row-title">${escapeHtml(t.title)}</span>
+      ${moodBadge(t)}
+      <span class="row-duration mono">${fmtDuration(t.duration_seconds)}</span>
+    `;
+    row.addEventListener("click", () => playTrack(t.id));
+    listEl.appendChild(row);
+  }
 }
 
 async function playTrack(trackId) {
@@ -465,6 +567,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupMiniMode();
   setupDragAndDrop();
   setupStreamPanel();
+  setupViewTabs();
+  document.getElementById("similar-close-btn").addEventListener("click", hideSimilarPanel);
 
   try {
     appTier = await invoke("app_tier");
@@ -472,6 +576,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     appTier = "free";
   }
   document.body.dataset.tier = appTier;
+  if (appTier === "pro") {
+    document.getElementById("foryou-tab").hidden = false;
+    setInterval(refreshTrackTags, 5000);
+  }
 
   await refreshFolders();
   await refreshTracks();

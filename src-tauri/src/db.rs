@@ -86,12 +86,21 @@ CREATE INDEX IF NOT EXISTS idx_play_events_played_at ON play_events(played_at);
 CREATE INDEX IF NOT EXISTS idx_track_tags_tag ON track_tags(tag_id);
 "#;
 
-pub fn init(app_data_dir: &Path) -> Connection {
-    std::fs::create_dir_all(app_data_dir).expect("failed to create app data dir");
+/// Opens a connection to the app's database file, with foreign keys and WAL
+/// mode enabled. WAL mode lets the background feature-extraction worker
+/// (which opens its own connection) read/write concurrently with the main
+/// connection without "database is locked" errors.
+pub fn open_connection(app_data_dir: &Path) -> Connection {
     let db_path = app_data_dir.join("resonate.db");
     let conn = Connection::open(db_path).expect("failed to open database");
-    conn.execute_batch("PRAGMA foreign_keys = ON;")
-        .expect("failed to enable foreign keys");
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
+        .expect("failed to configure database connection");
+    conn
+}
+
+pub fn init(app_data_dir: &Path) -> Connection {
+    std::fs::create_dir_all(app_data_dir).expect("failed to create app data dir");
+    let conn = open_connection(app_data_dir);
     conn.execute_batch(SCHEMA).expect("failed to run migrations");
     conn
 }

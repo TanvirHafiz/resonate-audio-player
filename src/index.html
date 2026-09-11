@@ -73,9 +73,21 @@
 
         <div class="track-list-wrap">
           <div class="track-list-label-row">
-            <span class="track-list-label">Library</span>
+            <div class="view-tabs" id="view-tabs">
+              <button class="tab-btn active" data-view="library">Library</button>
+              <button class="tab-btn" data-view="foryou" id="foryou-tab" hidden>For You</button>
+            </div>
             <button id="remove-selected-btn" class="btn-ghost remove-selected-btn" title="Remove selected from library">Remove</button>
           </div>
+
+          <div class="similar-panel" id="similar-panel" hidden>
+            <div class="similar-header">
+              <span class="similar-title" id="similar-title">Similar to…</span>
+              <button class="btn-ghost stream-close" id="similar-close-btn" title="Close">&#10005;</button>
+            </div>
+            <div class="similar-list" id="similar-list"></div>
+          </div>
+
           <div class="track-list" id="track-list">
             <div class="empty-state">No tracks yet. Add a folder, or drag audio files/folders anywhere in this window.</div>
           </div>

@@ -75,7 +75,7 @@ fn is_audio_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn insert_if_new(conn: &rusqlite::Connection, path: &Path) -> Result<bool, String> {
+fn insert_if_new(conn: &rusqlite::Connection, path: &Path) -> Result<Option<i64>, String> {
     let file_path = path.to_string_lossy().to_string();
     let exists: bool = conn
         .query_row(
@@ -85,7 +85,7 @@ fn insert_if_new(conn: &rusqlite::Connection, path: &Path) -> Result<bool, Strin
         )
         .unwrap_or(false);
     if exists {
-        return Ok(false);
+        return Ok(None);
     }
 
     let parsed = parse_track(path);
@@ -102,13 +102,13 @@ fn insert_if_new(conn: &rusqlite::Connection, path: &Path) -> Result<bool, Strin
         ],
     )
     .map_err(|e| e.to_string())?;
-    Ok(true)
+    Ok(Some(conn.last_insert_rowid()))
 }
 
 /// Recursively scans a folder for audio files, parses metadata, and inserts
 /// new tracks into the database (existing file_path entries are skipped).
-/// Returns the number of newly added tracks.
-pub fn scan_folder(db: &Db, folder: &str) -> Result<usize, String> {
+/// Returns the ids of newly added tracks.
+pub fn scan_folder(db: &Db, folder: &str) -> Result<Vec<i64>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT OR IGNORE INTO library_folders (path) VALUES (?1)",
@@ -116,7 +116,7 @@ pub fn scan_folder(db: &Db, folder: &str) -> Result<usize, String> {
     )
     .map_err(|e| e.to_string())?;
 
-    let mut added = 0usize;
+    let mut added = Vec::new();
 
     for entry in WalkDir::new(folder)
         .into_iter()
@@ -127,8 +127,8 @@ pub fn scan_folder(db: &Db, folder: &str) -> Result<usize, String> {
         if !is_audio_file(path) {
             continue;
         }
-        if insert_if_new(&conn, path)? {
-            added += 1;
+        if let Some(id) = insert_if_new(&conn, path)? {
+            added.push(id);
         }
     }
 
@@ -137,11 +137,11 @@ pub fn scan_folder(db: &Db, folder: &str) -> Result<usize, String> {
 
 /// Adds individual dropped paths (files and/or folders) to the library.
 /// Folders are scanned recursively; files are added directly if they look
-/// like audio. Existing file_path entries are skipped. Returns the number
-/// of newly added tracks.
-pub fn add_paths(db: &Db, paths: &[String]) -> Result<usize, String> {
+/// like audio. Existing file_path entries are skipped. Returns the ids of
+/// newly added tracks.
+pub fn add_paths(db: &Db, paths: &[String]) -> Result<Vec<i64>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let mut added = 0usize;
+    let mut added = Vec::new();
 
     for raw in paths {
         let path = Path::new(raw);
@@ -152,12 +152,16 @@ pub fn add_paths(db: &Db, paths: &[String]) -> Result<usize, String> {
                 .filter(|e| e.file_type().is_file())
             {
                 let entry_path = entry.path();
-                if is_audio_file(entry_path) && insert_if_new(&conn, entry_path)? {
-                    added += 1;
+                if is_audio_file(entry_path) {
+                    if let Some(id) = insert_if_new(&conn, entry_path)? {
+                        added.push(id);
+                    }
                 }
             }
-        } else if is_audio_file(path) && insert_if_new(&conn, path)? {
-            added += 1;
+        } else if is_audio_file(path) {
+            if let Some(id) = insert_if_new(&conn, path)? {
+                added.push(id);
+            }
         }
     }
 

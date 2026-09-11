@@ -200,3 +200,9 @@ All presets share the same layout, typography, and motion language — only the 
 - Which pretrained audio-tagging model to bundle/use for mood/genre (licensing, size, ONNX runtime availability on Windows)
 - Whether feature extraction runs synchronously on ingest or as a background queue for large libraries
 - Exact multi-output audio routing approach on Windows (WASAPI shared mode fan-out vs. per-device streams)
+
+## 9. Backlog (requested, not yet built)
+
+- **Library search bar** — basic substring search over title/artist/album, in addition to filtering by mood tag (pro tier, since mood tags only exist there)
+- **Lyrics fetcher, YouTube link, artist bio** buttons on the now-playing view (external metadata lookups; not tied to a specific phase — build after Phase 3 core intelligence work)
+- Multi-output audio routing (deferred from Phase 2 — see section 8)

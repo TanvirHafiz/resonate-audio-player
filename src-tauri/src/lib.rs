@@ -4,6 +4,8 @@ mod history;
 mod ingest;
 mod models;
 mod playback;
+#[cfg(feature = "pro")]
+mod pro;
 mod streaming;
 
 use db::Db;
@@ -21,6 +23,14 @@ pub fn run() {
                 .app_data_dir()
                 .expect("failed to resolve app data dir");
             let conn = db::init(&app_data_dir);
+
+            #[cfg(feature = "pro")]
+            {
+                let queue = pro::worker::FeatureQueue::spawn(app_data_dir.clone());
+                queue.enqueue_all(pro::worker::find_unanalyzed_tracks(&conn));
+                app.manage(queue);
+            }
+
             app.manage(Db(std::sync::Mutex::new(conn)));
             app.manage(Player::new());
             Ok(())
@@ -42,6 +52,16 @@ pub fn run() {
             api::get_now_playing,
             api::debug_log,
             api::app_tier,
+            #[cfg(feature = "pro")]
+            pro::api::more_like_this,
+            #[cfg(feature = "pro")]
+            pro::api::for_you_queue,
+            #[cfg(feature = "pro")]
+            pro::api::get_all_track_tags,
+            #[cfg(feature = "pro")]
+            pro::api::is_track_analyzed,
+            #[cfg(feature = "pro")]
+            pro::api::requeue_unanalyzed_tracks,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

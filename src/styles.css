@@ -18,6 +18,34 @@
   box-sizing: border-box;
 }
 
+/* ---------- Themed scrollbars ---------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--accent) 45%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+  background-clip: padding-box;
+}
+
 html,
 body {
   height: 100%;
@@ -242,6 +270,7 @@ body {
   background: var(--bg-elevated);
   border-right: 1px solid var(--line);
   min-width: 0;
+  min-height: 0;
 }
 
 .library-header {
@@ -438,6 +467,59 @@ body {
   color: var(--text-faint);
 }
 
+.view-tabs {
+  display: flex;
+  gap: 14px;
+}
+
+.tab-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.tab-btn.active {
+  color: var(--accent);
+}
+
+/* ---------- More Like This panel ---------- */
+
+.similar-panel {
+  margin: 0 8px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-elevated-2);
+}
+
+.similar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.similar-title {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.similar-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 .track-list {
   flex: 1;
   overflow-y: auto;
@@ -496,8 +578,34 @@ body {
   color: var(--text-faint);
 }
 
-.row-remove {
+.mood-badge {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.row-actions {
   display: none;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+.track-row:hover .row-duration,
+.track-row:hover .mood-badge {
+  display: none;
+}
+
+.track-row:hover .row-actions {
+  display: flex;
+}
+
+.row-remove,
+.row-similar {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
@@ -508,6 +616,7 @@ body {
   font-size: 0.7rem;
   line-height: 1;
   cursor: pointer;
+  display: flex;
   align-items: center;
   justify-content: center;
 }
@@ -517,12 +626,9 @@ body {
   color: #fff;
 }
 
-.track-row:hover .row-duration {
-  display: none;
-}
-
-.track-row:hover .row-remove {
-  display: flex;
+.row-similar:hover {
+  background: var(--bg-elevated);
+  color: var(--accent);
 }
 
 .row-tooltip {
