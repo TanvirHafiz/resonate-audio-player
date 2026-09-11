@@ -6,6 +6,7 @@
 
 pub mod affinity_engine;
 pub mod api;
+pub mod enrichment;
 pub mod feature_extraction;
 pub mod mood_tagging;
 pub mod playlists;

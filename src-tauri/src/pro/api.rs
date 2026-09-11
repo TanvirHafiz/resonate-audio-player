@@ -1,3 +1,4 @@
+use super::enrichment;
 use super::playlists::{self, Playlist};
 use super::recommendation_engine;
 use super::worker::FeatureQueue;
@@ -182,4 +183,25 @@ pub fn get_current_output_device(player: State<Player>) -> String {
 #[tauri::command]
 pub fn set_output_device(player: State<Player>, device_name: String) -> Result<(), String> {
     playback::set_output_device(&player, &device_name)
+}
+
+// ---------- Enrichment (lyrics / artist bio) ----------
+
+#[tauri::command]
+pub fn fetch_lyrics(artist: String, title: String) -> Result<Option<String>, String> {
+    enrichment::fetch_lyrics(&artist, &title)
+}
+
+#[derive(Serialize)]
+pub struct ArtistBioResponse {
+    pub summary: String,
+    pub source_url: Option<String>,
+}
+
+#[tauri::command]
+pub fn fetch_artist_bio(artist: String) -> Result<Option<ArtistBioResponse>, String> {
+    Ok(enrichment::fetch_artist_bio(&artist)?.map(|bio| ArtistBioResponse {
+        summary: bio.summary,
+        source_url: bio.source_url,
+    }))
 }

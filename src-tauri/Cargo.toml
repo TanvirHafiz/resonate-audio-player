@@ -19,7 +19,7 @@ default = []
 # Phase 3+ intelligence layer (feature extraction, mood tagging, affinity
 # engine, recommendations) and other advanced/paid-tier functionality lives
 # behind this flag. The default (free-tier) build excludes it entirely.
-pro = ["dep:chrono", "dep:rand"]
+pro = ["dep:chrono", "dep:rand", "dep:percent-encoding"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -35,10 +35,11 @@ walkdir = "2.5.0"
 rodio = "0.22.2"
 once_cell = "1.21.4"
 tauri-plugin-dialog = "2.7.3"
-ureq = "3.4.1"
+ureq = { version = "3.4.1", features = ["json"] }
 rss = "2.1.2"
 chrono = { version = "0.4.45", optional = true }
 rand = { version = "0.10.2", optional = true }
+percent-encoding = { version = "2.3.2", optional = true }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

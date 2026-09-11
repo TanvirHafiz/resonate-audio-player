@@ -80,6 +80,13 @@
         </div>
 
         <div class="track-list-wrap">
+          <div class="search-row" id="search-row" hidden>
+            <input type="text" id="search-input" class="stream-input search-input" placeholder="Search title, artist, album…" />
+            <select id="mood-filter-select" class="stream-input mood-filter-select">
+              <option value="">All moods</option>
+            </select>
+          </div>
+
           <div class="track-list-label-row">
             <div class="view-tabs" id="view-tabs">
               <button class="tab-btn active" data-view="library">Library</button>
@@ -116,6 +123,12 @@
           <div class="now-playing-meta">
             <div class="track-title" id="np-title">Nothing playing</div>
             <div class="track-sub" id="np-sub">Pick a track from your library</div>
+          </div>
+
+          <div class="enrichment-row" id="enrichment-row" hidden>
+            <button class="btn-ghost" id="lyrics-btn">Lyrics</button>
+            <button class="btn-ghost" id="youtube-btn">YouTube</button>
+            <button class="btn-ghost" id="bio-btn">Artist Bio</button>
           </div>
 
           <div class="vu-meter" id="vu-meter">
@@ -166,6 +179,37 @@
           <div class="modal-section">
             <div class="modal-section-label">Audio Output</div>
             <select class="stream-input" id="output-device-select"></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="info-modal" hidden>
+        <div class="modal-panel">
+          <div class="modal-header">
+            <span class="modal-title" id="info-modal-title">Lyrics</span>
+            <button class="btn-ghost stream-close" id="info-modal-close" title="Close">&#10005;</button>
+          </div>
+          <div class="info-modal-body" id="info-modal-body"></div>
+        </div>
+      </div>
+
+      <div class="modal-overlay" id="upsell-modal" hidden>
+        <div class="modal-panel">
+          <div class="modal-header">
+            <span class="modal-title">Resonate Pro</span>
+            <button class="btn-ghost stream-close" id="upsell-close-btn" title="Close">&#10005;</button>
+          </div>
+          <div class="info-modal-body">
+            <p>You're using the free version of Resonate. Pro unlocks:</p>
+            <ul class="upsell-feature-list">
+              <li>Mood &amp; genre intelligence for every track</li>
+              <li>"More Like This" and "For You" recommendations</li>
+              <li>Playlists</li>
+              <li>Library search (by text or mood)</li>
+              <li>Lyrics, YouTube, and artist bio lookup</li>
+              <li>Output device selection &amp; library folder management</li>
+            </ul>
+            <button class="btn-ghost upsell-cta" id="upsell-cta-btn" disabled title="Coming soon">Get Resonate Pro</button>
           </div>
         </div>
       </div>

@@ -322,6 +322,12 @@ body {
   color: var(--text);
 }
 
+.btn-ghost:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
 /* ---------- Stream / podcast panel ---------- */
 
 .stream-panel {
@@ -1082,4 +1088,72 @@ body {
   gap: 6px;
   max-height: 140px;
   overflow-y: auto;
+}
+
+/* ---------- Search + mood filter ---------- */
+
+.search-row {
+  display: flex;
+  gap: 6px;
+  padding: 10px 8px 0;
+}
+
+.search-input {
+  flex: 1;
+}
+
+.mood-filter-select {
+  flex: 0 0 auto;
+  max-width: 110px;
+}
+
+/* ---------- Now-playing enrichment ---------- */
+
+.enrichment-row {
+  display: flex;
+  gap: 8px;
+}
+
+.enrichment-row .btn-ghost {
+  font-size: 0.7rem;
+}
+
+.info-modal-body {
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-height: 50vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.info-modal-body a {
+  color: var(--accent);
+}
+
+/* ---------- Free-tier upsell ---------- */
+
+.titlebar-title.upsell-link {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.titlebar-title.upsell-link:hover {
+  text-decoration: underline;
+}
+
+.upsell-feature-list {
+  margin: 10px 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.upsell-cta {
+  margin-top: 6px;
+  width: 100%;
+  text-align: center;
+  border-color: var(--accent);
+  color: var(--accent);
 }

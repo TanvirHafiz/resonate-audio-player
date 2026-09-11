@@ -3,6 +3,7 @@ const { open } = window.__TAURI__.dialog;
 const { listen } = window.__TAURI__.event;
 const { getCurrentWindow, currentMonitor } = window.__TAURI__.window;
 const { PhysicalSize, PhysicalPosition } = window.__TAURI__.dpi;
+const { openUrl } = window.__TAURI__.opener;
 
 const MINI_SIZE = { width: 300, height: 64 };
 const MINI_MARGIN = 24;
@@ -21,6 +22,8 @@ let viewMode = "library"; // "library" | "foryou" | "playlist"
 let trackTags = {}; // { [track_id]: { mood: string[], genre: string[] } }
 let playlists = [];
 let activePlaylistId = null;
+let searchQuery = "";
+let moodFilter = "";
 let nowPlaying = null;
 let pollHandle = null;
 let isSeeking = false;
@@ -93,11 +96,26 @@ async function refreshTrackTags() {
   try {
     const rows = await invoke("get_all_track_tags");
     trackTags = {};
-    for (const r of rows) trackTags[r.track_id] = { mood: r.mood, genre: r.genre };
+    const moods = new Set();
+    for (const r of rows) {
+      trackTags[r.track_id] = { mood: r.mood, genre: r.genre };
+      for (const m of r.mood) moods.add(m);
+    }
+    updateMoodFilterOptions(moods);
     renderTrackList();
   } catch (e) {
     console.error("get_all_track_tags failed", e);
   }
+}
+
+function updateMoodFilterOptions(moods) {
+  const select = document.getElementById("mood-filter-select");
+  const sorted = Array.from(moods).sort();
+  const current = select.value;
+  select.innerHTML =
+    `<option value="">All moods</option>` +
+    sorted.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+  if (sorted.includes(current)) select.value = current;
 }
 
 function moodBadge(t) {
@@ -115,12 +133,29 @@ function rowTooltipText(t) {
   return text;
 }
 
+function matchesFilters(t) {
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    const haystack = `${t.title} ${t.artist} ${t.album}`.toLowerCase();
+    if (!haystack.includes(q)) return false;
+  }
+  if (moodFilter && !trackTags[t.id]?.mood?.includes(moodFilter)) {
+    return false;
+  }
+  return true;
+}
+
 function renderTrackList() {
   const container = document.getElementById("track-list");
   container.innerHTML = "";
-  displayTracks = viewMode === "foryou" ? forYouTracks : viewMode === "playlist" ? playlistTracks : tracks;
+  const baseTracks = viewMode === "foryou" ? forYouTracks : viewMode === "playlist" ? playlistTracks : tracks;
+  displayTracks = searchQuery || moodFilter ? baseTracks.filter(matchesFilters) : baseTracks;
 
   if (displayTracks.length === 0) {
+    if (baseTracks.length > 0) {
+      container.innerHTML = `<div class="empty-state">No tracks match your search/filter.</div>`;
+      return;
+    }
     const emptyMessages = {
       foryou: `<div class="empty-state">Nothing to recommend yet — play a few tracks first so Resonate can learn your taste.</div>`,
       playlist: `<div class="empty-state">This playlist is empty. Browse Library and use the + button to add tracks.</div>`,
@@ -294,6 +329,17 @@ function setupPlaylists() {
   document.getElementById("playlist-banner-clear").addEventListener("click", clearActivePlaylist);
 }
 
+function setupSearch() {
+  document.getElementById("search-input").addEventListener("input", (e) => {
+    searchQuery = e.target.value.trim();
+    renderTrackList();
+  });
+  document.getElementById("mood-filter-select").addEventListener("change", (e) => {
+    moodFilter = e.target.value;
+    renderTrackList();
+  });
+}
+
 function setupViewTabs() {
   document.getElementById("view-tabs").addEventListener("click", async (e) => {
     const btn = e.target.closest(".tab-btn");
@@ -451,18 +497,29 @@ function renderNowPlaying(state) {
   if (state.track) {
     titleEl.textContent = state.track.title;
     subEl.textContent = trackSubtitle(state.track);
-    titlebarTitleEl.textContent = `${state.track.title} — ${trackSubtitle(state.track)}`;
     miniTitleEl.textContent = state.track.title;
   } else {
     titleEl.textContent = "Nothing playing";
     subEl.textContent = "Pick a track from your library";
-    titlebarTitleEl.textContent = "Resonate";
     miniTitleEl.textContent = "Nothing playing";
+  }
+
+  // In the free build, the titlebar carries a persistent upsell link
+  // instead of the track name (set once at startup) — don't overwrite it.
+  if (appTier === "pro") {
+    titlebarTitleEl.textContent = state.track
+      ? `${state.track.title} — ${trackSubtitle(state.track)}`
+      : "Resonate";
   }
 
   playBtn.textContent = state.is_playing ? "⏸" : "▶";
   miniPlayBtn.textContent = state.is_playing ? "⏸" : "▶";
   vu.classList.toggle("playing", state.is_playing);
+
+  const canEnrich = Boolean(state.track?.artist);
+  for (const id of ["lyrics-btn", "youtube-btn", "bio-btn"]) {
+    document.getElementById(id).disabled = !canEnrich;
+  }
 
   const duration = state.track?.duration_seconds ?? 0;
   totalEl.textContent = fmtDuration(duration);
@@ -666,6 +723,98 @@ async function refreshOutputDevices() {
   }
 }
 
+function showInfoModal(title, bodyHtml) {
+  document.getElementById("info-modal-title").textContent = title;
+  document.getElementById("info-modal-body").innerHTML = bodyHtml;
+  document.getElementById("info-modal").hidden = false;
+}
+
+async function openExternal(url) {
+  try {
+    await openUrl(url);
+  } catch (e) {
+    console.error("openUrl failed", e);
+  }
+}
+
+async function showLyrics() {
+  const track = nowPlaying?.track;
+  if (!track?.artist) return;
+  showInfoModal(`Lyrics — ${track.title}`, `<div class="empty-state">Fetching lyrics…</div>`);
+  try {
+    const lyrics = await invoke("fetch_lyrics", { artist: track.artist, title: track.title });
+    document.getElementById("info-modal-body").innerHTML = lyrics
+      ? escapeHtml(lyrics)
+      : `<div class="empty-state">No lyrics found for this track.</div>`;
+  } catch (e) {
+    document.getElementById("info-modal-body").innerHTML = `<div class="empty-state">Couldn't fetch lyrics.</div>`;
+    console.error("fetch_lyrics failed", e);
+  }
+}
+
+async function showBio() {
+  const track = nowPlaying?.track;
+  if (!track?.artist) return;
+  showInfoModal(`About ${track.artist}`, `<div class="empty-state">Fetching bio…</div>`);
+  try {
+    const bio = await invoke("fetch_artist_bio", { artist: track.artist });
+    if (!bio) {
+      document.getElementById("info-modal-body").innerHTML = `<div class="empty-state">No bio found for this artist.</div>`;
+      return;
+    }
+    const linkHtml = bio.source_url ? `<p><a href="#" id="bio-source-link">Read more on Wikipedia</a></p>` : "";
+    document.getElementById("info-modal-body").innerHTML = `<p>${escapeHtml(bio.summary)}</p>${linkHtml}`;
+    document.getElementById("bio-source-link")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      openExternal(bio.source_url);
+    });
+  } catch (e) {
+    document.getElementById("info-modal-body").innerHTML = `<div class="empty-state">Couldn't fetch bio.</div>`;
+    console.error("fetch_artist_bio failed", e);
+  }
+}
+
+function openYoutubeForCurrentTrack() {
+  const track = nowPlaying?.track;
+  if (!track) return;
+  const query = encodeURIComponent(`${track.artist ?? ""} ${track.title}`.trim());
+  openExternal(`https://www.youtube.com/results?search_query=${query}`);
+}
+
+function setupUpsell() {
+  const titlebarTitleEl = document.getElementById("titlebar-title");
+  titlebarTitleEl.textContent = "Free mode · click here for full version features";
+  titlebarTitleEl.classList.add("upsell-link");
+  // Prevent the titlebar's deep drag-region from swallowing clicks on this
+  // (now interactive) span — see drag.js's isDragRegion handling.
+  titlebarTitleEl.setAttribute("data-tauri-drag-region", "false");
+
+  const modal = document.getElementById("upsell-modal");
+  titlebarTitleEl.addEventListener("click", () => {
+    modal.hidden = false;
+  });
+  document.getElementById("upsell-close-btn").addEventListener("click", () => {
+    modal.hidden = true;
+  });
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.hidden = true;
+  });
+}
+
+function setupEnrichment() {
+  document.getElementById("lyrics-btn").addEventListener("click", showLyrics);
+  document.getElementById("youtube-btn").addEventListener("click", openYoutubeForCurrentTrack);
+  document.getElementById("bio-btn").addEventListener("click", showBio);
+
+  const modal = document.getElementById("info-modal");
+  document.getElementById("info-modal-close").addEventListener("click", () => {
+    modal.hidden = true;
+  });
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.hidden = true;
+  });
+}
+
 let savedWindowRect = null;
 let isMini = false;
 
@@ -773,6 +922,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupViewTabs();
   setupSettings();
   setupPlaylists();
+  setupSearch();
+  setupEnrichment();
   document.getElementById("similar-close-btn").addEventListener("click", hideSimilarPanel);
 
   try {
@@ -784,10 +935,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (appTier === "pro") {
     document.getElementById("foryou-tab").hidden = false;
     document.getElementById("playlists-section").hidden = false;
+    document.getElementById("search-row").hidden = false;
+    document.getElementById("enrichment-row").hidden = false;
     setInterval(refreshTrackTags, 5000);
     await refreshPlaylists();
   } else {
     document.getElementById("settings-btn").hidden = true;
+    setupUpsell();
   }
 
   await refreshFolders();

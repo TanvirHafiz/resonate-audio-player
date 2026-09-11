@@ -85,6 +85,10 @@ pub fn run() {
             pro::api::get_current_output_device,
             #[cfg(feature = "pro")]
             pro::api::set_output_device,
+            #[cfg(feature = "pro")]
+            pro::api::fetch_lyrics,
+            #[cfg(feature = "pro")]
+            pro::api::fetch_artist_bio,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
