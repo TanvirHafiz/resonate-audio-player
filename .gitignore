@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Built installers — large binaries, don't belong in git history
+EXEs/
+*.exe
+
 # Claude Code session state
 .claude/
 
