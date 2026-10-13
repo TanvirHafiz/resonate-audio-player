@@ -4,7 +4,9 @@ use crate::ingest;
 use crate::models::{NowPlaying, Track};
 use crate::playback::{self, Player};
 use crate::streaming::{self, PodcastEpisode};
+use crate::youtube::{self, YoutubeResult};
 use rusqlite::params;
+use serde::Serialize;
 #[cfg(feature = "pro")]
 use tauri::Manager;
 use tauri::State;
@@ -126,7 +128,10 @@ fn start_track(
     };
     let result = match (&track.file_path, &track.stream_url) {
         (Some(path), _) => playback::play_file(player, path),
-        (None, Some(url)) => playback::play_stream(player, url),
+        (None, Some(url)) => match youtube::video_id_from_url(url) {
+            Some(video_id) => youtube::play(player, &video_id),
+            None => playback::play_stream(player, url),
+        },
         (None, None) => Err("track has neither a file nor a stream URL".into()),
     };
     if let Err(e) = &result {
@@ -249,5 +254,110 @@ pub fn get_now_playing(db: State<Db>, player: State<Player>) -> Result<NowPlayin
         volume: playback::get_volume(&player),
         queue_index,
         queue_len: queue.len(),
+        loading: playback::is_loading(&player),
+        error: playback::take_last_error(&player),
     })
+}
+
+// ---------- YouTube ----------
+
+#[derive(Serialize)]
+pub struct YoutubeStatus {
+    pub ready: bool,
+    pub cache_bytes: u64,
+}
+
+#[tauri::command]
+pub fn youtube_status() -> YoutubeStatus {
+    YoutubeStatus {
+        ready: youtube::is_ready(),
+        cache_bytes: youtube::cache_size_bytes(),
+    }
+}
+
+/// One-time download of yt-dlp + Deno. Async so the window stays
+/// responsive; progress arrives as `youtube-setup-progress` events.
+#[tauri::command]
+pub async fn youtube_setup(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || youtube::setup(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn youtube_update() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(youtube::update_ytdlp)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn youtube_search(db: State<'_, Db>, query: String) -> Result<Vec<YoutubeResult>, String> {
+    let mut results = tauri::async_runtime::spawn_blocking(move || youtube::search(&query, 20))
+        .await
+        .map_err(|e| e.to_string())??;
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    youtube::annotate(&conn, &mut results);
+    Ok(results)
+}
+
+/// Plays `results[index]` with the whole result list as the queue, so
+/// next/previous walk through the search results. Results get (hidden)
+/// track rows so history, affinity and playlists work on them.
+#[tauri::command]
+pub fn youtube_play(
+    db: State<Db>,
+    player: State<Player>,
+    results: Vec<YoutubeResult>,
+    index: usize,
+) -> Result<Option<Track>, String> {
+    if results.is_empty() {
+        return Ok(None);
+    }
+    let ids = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        results
+            .iter()
+            .map(|r| youtube::upsert_track(&conn, r, false))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    record_history_for_current(&db, &player)?;
+    let index = index.min(ids.len() - 1);
+    playback::set_queue(&player, ids.clone(), index);
+    start_track(&db, &player, ids[index])
+}
+
+/// Saves a YouTube result to the library; returns its track id.
+#[tauri::command]
+pub fn youtube_save(db: State<Db>, result: YoutubeResult) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    youtube::upsert_track(&conn, &result, true)
+}
+
+#[derive(Serialize)]
+pub struct ImportedPlaylist {
+    pub title: String,
+    pub track_ids: Vec<i64>,
+    pub skipped: usize,
+}
+
+/// Imports every playable video of a YouTube / YouTube Music playlist into
+/// the library. (The pro frontend also turns it into a Resonate playlist.)
+#[tauri::command]
+pub async fn youtube_import_playlist(db: State<'_, Db>, url: String) -> Result<ImportedPlaylist, String> {
+    let (title, results, skipped) =
+        tauri::async_runtime::spawn_blocking(move || youtube::fetch_playlist(&url))
+            .await
+            .map_err(|e| e.to_string())??;
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let track_ids = results
+        .iter()
+        .map(|r| youtube::upsert_track(&conn, r, true))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ImportedPlaylist { title, track_ids, skipped })
+}
+
+#[tauri::command]
+pub fn youtube_clear_cache() -> Result<(), String> {
+    youtube::clear_cache()
 }

@@ -21,4 +21,10 @@ pub struct NowPlaying {
     pub volume: f32,
     pub queue_index: Option<usize>,
     pub queue_len: usize,
+    /// True while the current track's audio is still being fetched in the
+    /// background (YouTube tracks take a second or two to start).
+    pub loading: bool,
+    /// A playback error to show the user once (e.g. a YouTube video that
+    /// is unavailable). Cleared after it's been reported.
+    pub error: Option<String>,
 }

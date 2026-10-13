@@ -91,6 +91,7 @@
             <div class="view-tabs" id="view-tabs">
               <button class="tab-btn active" data-view="library">Library</button>
               <button class="tab-btn" data-view="foryou" id="foryou-tab" hidden>For You</button>
+              <button class="tab-btn" data-view="youtube" id="youtube-tab">YouTube</button>
             </div>
             <button id="remove-selected-btn" class="btn-ghost remove-selected-btn" title="Remove selected from library">Remove</button>
           </div>
@@ -98,6 +99,34 @@
           <div class="playlist-banner" id="playlist-banner" hidden>
             <span id="playlist-banner-text"></span>
             <button class="btn-ghost" id="playlist-banner-clear">Done</button>
+          </div>
+
+          <div class="yt-panel" id="yt-panel" hidden>
+            <div class="yt-setup" id="yt-setup" hidden>
+              <div class="yt-setup-title">Stream music from YouTube</div>
+              <p class="yt-setup-text">
+                Resonate plays the audio only, never video. It needs two free helper tools,
+                yt-dlp and Deno (about 60&nbsp;MB, downloaded once from GitHub).
+              </p>
+              <button class="btn-ghost yt-setup-btn" id="yt-setup-btn">Set up YouTube</button>
+              <div class="yt-setup-progress mono" id="yt-setup-progress"></div>
+            </div>
+
+            <form class="yt-search" id="yt-search-form" hidden>
+              <input
+                type="text"
+                id="yt-search-input"
+                class="stream-input"
+                placeholder="Search YouTube, or paste a video / playlist link"
+                autocomplete="off"
+              />
+              <button class="btn-ghost" type="submit" id="yt-search-btn">Search</button>
+            </form>
+
+            <div class="yt-cache-row" id="yt-cache-row" hidden>
+              <span class="mono" id="yt-cache-info">Offline cache: 0 MB</span>
+              <button class="btn-ghost" id="yt-cache-clear-btn">Clear</button>
+            </div>
           </div>
 
           <div class="similar-panel" id="similar-panel" hidden>
@@ -117,7 +146,8 @@
       <main class="deck">
         <div class="deck-inner">
           <div class="art" id="art">
-            <div class="art-placeholder">♪</div>
+            <div class="art-placeholder" id="art-placeholder">♪</div>
+            <img class="art-thumb" id="art-thumb" alt="" hidden />
           </div>
 
           <div class="now-playing-meta">
@@ -162,6 +192,8 @@
           </div>
         </div>
       </main>
+
+      <div class="toast" id="toast" hidden></div>
 
       <div class="modal-overlay" id="settings-modal" hidden>
         <div class="modal-panel">

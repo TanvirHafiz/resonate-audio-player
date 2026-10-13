@@ -30,7 +30,18 @@ impl StreamReader {
         let response = ureq::get(url)
             .call()
             .map_err(|e| format!("failed to open stream: {e}"))?;
+        Ok(Self::from_reader(response.into_body().into_reader(), None))
+    }
 
+    /// Wraps any byte source (e.g. a child process's stdout) in the same
+    /// progressive, seekable buffer. `on_complete` runs once in the
+    /// download thread after the source finishes; it receives the full
+    /// buffered bytes on success or the error message on failure. Used by
+    /// the YouTube source to write a finished download to its cache.
+    pub fn from_reader(
+        body_reader: impl Read + Send + 'static,
+        on_complete: Option<OnComplete>,
+    ) -> Self {
         let shared = Arc::new((
             Mutex::new(Inner {
                 data: Vec::new(),
@@ -42,7 +53,7 @@ impl StreamReader {
 
         let shared_clone = shared.clone();
         thread::spawn(move || {
-            let mut body_reader = response.into_body().into_reader();
+            let mut body_reader = body_reader;
             let mut buf = [0u8; 16 * 1024];
             loop {
                 match body_reader.read(&mut buf) {
@@ -67,9 +78,47 @@ impl StreamReader {
                     }
                 }
             }
+
+            if let Some(callback) = on_complete {
+                // Copy out under the lock, then release it before running the
+                // callback, so a slow disk write can't stall the playback
+                // thread's reads.
+                let outcome: Result<Vec<u8>, String> = {
+                    let (lock, _) = &*shared_clone;
+                    let inner = lock.lock().unwrap();
+                    match &inner.error {
+                        Some(err) => Err(err.clone()),
+                        None => Ok(inner.data.clone()),
+                    }
+                };
+                match &outcome {
+                    Ok(data) => callback(Ok(data)),
+                    Err(err) => callback(Err(err)),
+                }
+            }
         });
 
-        Ok(StreamReader { shared, position: 0 })
+        StreamReader { shared, position: 0 }
+    }
+
+    /// Blocks until the first bytes arrive. Returns the source's error if
+    /// it failed before producing anything (or finished empty), so callers
+    /// can report a meaningful message instead of a decoder probe failure.
+    pub fn wait_for_data(&self) -> Result<(), String> {
+        let (lock, cvar) = &*self.shared;
+        let mut inner = lock.lock().unwrap();
+        loop {
+            if !inner.data.is_empty() {
+                return Ok(());
+            }
+            if inner.done {
+                return Err(inner
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "no audio was received".to_string()));
+            }
+            inner = cvar.wait(inner).unwrap();
+        }
     }
 }
 
@@ -129,6 +178,10 @@ impl Seek for StreamReader {
         }
     }
 }
+
+/// Called once when a `StreamReader`'s source finishes: the full bytes on
+/// success, or the error message.
+pub type OnComplete = Box<dyn FnOnce(Result<&[u8], &str>) + Send>;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct PodcastEpisode {

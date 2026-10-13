@@ -44,14 +44,16 @@ impl FeatureQueue {
 const MAX_TRACK_DURATION_SECONDS: f64 = 20.0 * 60.0;
 
 fn process_track(conn: &Connection, track_id: i64) -> Result<(), String> {
-    let (file_path, duration): (Option<String>, f64) = conn
+    let (file_path, stream_url, duration): (Option<String>, Option<String>, f64) = conn
         .query_row(
-            "SELECT file_path, duration_seconds FROM tracks WHERE id = ?1",
+            "SELECT file_path, stream_url, duration_seconds FROM tracks WHERE id = ?1",
             [track_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|e| e.to_string())?;
 
+    // YouTube tracks are analyzable once their audio is in the local cache.
+    let file_path = file_path.or_else(|| youtube_cached_path(stream_url.as_deref()));
     let Some(path) = file_path else {
         return Ok(()); // stream track, nothing local to analyze
     };
@@ -96,14 +98,43 @@ fn process_track(conn: &Connection, track_id: i64) -> Result<(), String> {
 /// (or any track that failed analysis previously).
 pub fn find_unanalyzed_tracks(conn: &Connection) -> Vec<i64> {
     let mut stmt = match conn.prepare(
-        "SELECT t.id FROM tracks t
-         WHERE t.source_type = 'local' AND t.file_path IS NOT NULL
+        "SELECT t.id, t.file_path, t.stream_url FROM tracks t
+         WHERE (t.file_path IS NOT NULL OR t.stream_url LIKE 'https://www.youtube.com/watch?v=%')
            AND NOT EXISTS (SELECT 1 FROM track_features tf WHERE tf.track_id = t.id)",
     ) {
         Ok(stmt) => stmt,
         Err(_) => return Vec::new(),
     };
-    stmt.query_map([], |row| row.get(0))
+    stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?))
+    })
+    .map(|rows| {
+        rows.filter_map(Result::ok)
+            // Local files always; YouTube tracks only once cached.
+            .filter(|(_, file_path, stream_url)| {
+                file_path.is_some() || youtube_cached_path(stream_url.as_deref()).is_some()
+            })
+            .map(|(id, _, _)| id)
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+fn youtube_cached_path(stream_url: Option<&str>) -> Option<String> {
+    let video_id = crate::youtube::video_id_from_url(stream_url?)?;
+    crate::youtube::cached_path(&video_id).map(|p| p.to_string_lossy().to_string())
+}
+
+/// Track ids whose `stream_url` is `url` (used to queue a YouTube track for
+/// analysis once its audio lands in the cache).
+pub fn tracks_for_stream_url(app: &tauri::AppHandle, url: &str) -> Vec<i64> {
+    use tauri::Manager;
+    let db = app.state::<crate::db::Db>();
+    let Ok(conn) = db.0.lock() else { return Vec::new() };
+    let Ok(mut stmt) = conn.prepare("SELECT id FROM tracks WHERE stream_url = ?1") else {
+        return Vec::new();
+    };
+    stmt.query_map([url], |row| row.get(0))
         .map(|rows| rows.filter_map(Result::ok).collect())
         .unwrap_or_default()
 }

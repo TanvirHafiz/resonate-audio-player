@@ -6,7 +6,7 @@ use rodio::stream::{DeviceSinkBuilder, MixerDeviceSink};
 use rodio::{Decoder, Player as RodioPlayer, Source};
 use std::fs::File;
 use std::io::BufReader;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub struct PlaybackState {
@@ -18,9 +18,21 @@ pub struct PlaybackState {
     session_id: i64,
     device_name: String,
     eq: EqHandle,
+    /// Bumped every time a new track starts loading, so a slow background
+    /// load (e.g. a YouTube stream) that finishes after the user has
+    /// already moved on can tell it's stale and discard itself.
+    load_generation: u64,
+    /// True while a background load is in flight. Keeps the auto-advance
+    /// check (`sink_empty`) from treating "not loaded yet" as "finished".
+    pub loading: bool,
+    /// Last background-load failure, handed to the frontend once via
+    /// `take_last_error` so it can show a message.
+    last_error: Option<String>,
 }
 
-pub struct Player(pub Mutex<PlaybackState>);
+/// Shared behind an `Arc` so background loaders (see `play_async`) can
+/// reach the player from their own thread once their audio is ready.
+pub struct Player(pub Arc<Mutex<PlaybackState>>);
 
 impl Player {
     pub fn new() -> Self {
@@ -35,7 +47,7 @@ impl Player {
             .default_output_device()
             .and_then(|d| d.description().ok().map(|desc| desc.name().to_string()))
             .unwrap_or_else(|| "Default".to_string());
-        Player(Mutex::new(PlaybackState {
+        Player(Arc::new(Mutex::new(PlaybackState {
             _sink_device: sink_device,
             player,
             queue: Vec::new(),
@@ -44,7 +56,10 @@ impl Player {
             session_id,
             device_name,
             eq: EqHandle::new(),
-        }))
+            load_generation: 0,
+            loading: false,
+            last_error: None,
+        })))
     }
 }
 
@@ -108,6 +123,8 @@ pub fn set_output_device(player: &Player, device_name: &str) -> Result<(), Strin
     state._sink_device = sink_device;
     state.player = new_player;
     state.is_playing = false;
+    state.loading = false;
+    state.load_generation += 1;
     state.device_name = device_name.to_string();
     Ok(())
 }
@@ -117,6 +134,9 @@ pub fn session_id(player: &Player) -> i64 {
 }
 
 fn start_source(state: &mut PlaybackState, source: impl Source<Item = f32> + Send + 'static) {
+    // Any background load still in flight is now stale.
+    state.load_generation += 1;
+    state.loading = false;
     state.player.stop();
     state.player.append(source);
     state.player.play();
@@ -156,6 +176,75 @@ pub fn play_stream(player: &Player, url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A `Read + Seek` byte source that rodio can decode from, produced on a
+/// background thread by `play_async`'s loader.
+pub type LoadedReader = Box<dyn ReadSeekSend>;
+
+pub trait ReadSeekSend: std::io::Read + std::io::Seek + Send + Sync {}
+impl<T: std::io::Read + std::io::Seek + Send + Sync> ReadSeekSend for T {}
+
+/// Starts playing audio whose source takes a while to obtain (e.g. a
+/// YouTube stream that needs yt-dlp to resolve and start downloading)
+/// without blocking the caller. Stops whatever is playing, marks the
+/// player as loading, and runs `loader` plus the decoder's format probe
+/// on a background thread. When that finishes, playback starts — unless
+/// the user has since moved to another track, in which case the result is
+/// dropped. On failure, the error is kept for `take_last_error` and the
+/// player is left "playing but empty", so the normal auto-advance moves on
+/// to the next queued track.
+pub fn play_async<F>(player: &Player, loader: F)
+where
+    F: FnOnce() -> Result<LoadedReader, String> + Send + 'static,
+{
+    let generation = {
+        let mut state = player.0.lock().unwrap();
+        state.player.stop();
+        state.load_generation += 1;
+        state.loading = true;
+        state.is_playing = true;
+        state.last_error = None;
+        state.load_generation
+    };
+
+    let shared = player.0.clone();
+    std::thread::spawn(move || {
+        let decoded = loader().and_then(|reader| Decoder::new(reader).map_err(|e| e.to_string()));
+
+        let mut state = shared.lock().unwrap();
+        if state.load_generation != generation {
+            return; // user moved on while we were loading
+        }
+        state.loading = false;
+        match decoded {
+            Ok(source) => {
+                let user_paused = !state.is_playing;
+                let source = EqSource::new(source, state.eq.clone());
+                state.player.stop();
+                state.player.append(source);
+                if user_paused {
+                    state.player.pause();
+                } else {
+                    state.player.play();
+                    state.is_playing = true;
+                }
+            }
+            Err(e) => {
+                eprintln!("background load failed: {e}");
+                state.last_error = Some(e);
+            }
+        }
+    });
+}
+
+/// Returns (and clears) the most recent background-load error, if any.
+pub fn take_last_error(player: &Player) -> Option<String> {
+    player.0.lock().unwrap().last_error.take()
+}
+
+pub fn is_loading(player: &Player) -> bool {
+    player.0.lock().unwrap().loading
+}
+
 pub fn pause(player: &Player) {
     let mut state = player.0.lock().unwrap();
     state.player.pause();
@@ -172,6 +261,8 @@ pub fn stop(player: &Player) {
     let mut state = player.0.lock().unwrap();
     state.player.stop();
     state.is_playing = false;
+    state.loading = false;
+    state.load_generation += 1;
 }
 
 pub fn set_volume(player: &Player, volume: f32) {
@@ -209,7 +300,7 @@ pub fn is_playing(player: &Player) -> bool {
 /// True once the sink has no more queued audio (current track finished).
 pub fn sink_empty(player: &Player) -> bool {
     let state = player.0.lock().unwrap();
-    state.is_playing && state.player.empty()
+    state.is_playing && !state.loading && state.player.empty()
 }
 
 pub fn current_queue_snapshot(player: &Player) -> (Vec<i64>, Option<usize>) {

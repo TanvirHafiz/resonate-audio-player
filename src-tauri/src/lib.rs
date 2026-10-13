@@ -8,6 +8,7 @@ mod playback;
 #[cfg(feature = "pro")]
 mod pro;
 mod streaming;
+mod youtube;
 
 use db::Db;
 use playback::Player;
@@ -24,12 +25,24 @@ pub fn run() {
                 .app_data_dir()
                 .expect("failed to resolve app data dir");
             let conn = db::init(&app_data_dir);
+            youtube::init(&app_data_dir);
 
             #[cfg(feature = "pro")]
             {
                 let queue = pro::worker::FeatureQueue::spawn(app_data_dir.clone());
                 queue.enqueue_all(pro::worker::find_unanalyzed_tracks(&conn));
                 app.manage(queue);
+
+                // When a YouTube track finishes downloading into the cache,
+                // analyze it like a local file so it gets mood tags and can
+                // take part in recommendations.
+                let handle = app.handle().clone();
+                youtube::set_on_cached(move |video_id| {
+                    let ids = pro::worker::tracks_for_stream_url(&handle, &youtube::video_url(video_id));
+                    if let Some(queue) = handle.try_state::<pro::worker::FeatureQueue>() {
+                        queue.enqueue_all(ids);
+                    }
+                });
             }
 
             app.manage(Db(std::sync::Mutex::new(conn)));
@@ -54,6 +67,14 @@ pub fn run() {
             api::get_now_playing,
             api::debug_log,
             api::app_tier,
+            api::youtube_status,
+            api::youtube_setup,
+            api::youtube_update,
+            api::youtube_search,
+            api::youtube_play,
+            api::youtube_save,
+            api::youtube_import_playlist,
+            api::youtube_clear_cache,
             #[cfg(feature = "pro")]
             pro::api::more_like_this,
             #[cfg(feature = "pro")]

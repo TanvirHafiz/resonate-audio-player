@@ -18,7 +18,7 @@ let tracks = [];
 let forYouTracks = [];
 let playlistTracks = [];
 let displayTracks = [];
-let viewMode = "library"; // "library" | "foryou" | "playlist"
+let viewMode = "library"; // "library" | "foryou" | "playlist" | "youtube"
 let trackTags = {}; // { [track_id]: { mood: string[], genre: string[] } }
 let playlists = [];
 let activePlaylistId = null;
@@ -31,6 +31,24 @@ let isDraggingScrubber = false;
 let selectedIds = new Set();
 let lastClickedIndex = null;
 let lastRenderedActiveId = undefined;
+
+// YouTube tab state. Results are plain search results (not library
+// tracks) until played or saved, so they render through their own path.
+let youtubeResults = [];
+let youtubeReady = false;
+let youtubeState = "idle"; // "idle" | "searching" | "done" | "error"
+let youtubeMessage = "";
+
+const YOUTUBE_URL_PREFIX = "https://www.youtube.com/watch?v=";
+
+function youtubeVideoId(track) {
+  const url = track?.stream_url ?? "";
+  return url.startsWith(YOUTUBE_URL_PREFIX) ? url.slice(YOUTUBE_URL_PREFIX.length) : null;
+}
+
+function isYoutubeTrack(track) {
+  return youtubeVideoId(track) !== null;
+}
 
 function fmtTime(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
@@ -50,6 +68,7 @@ function trackSubtitle(t) {
   if (t.artist || t.album) {
     return [t.artist, t.album].filter(Boolean).join(" — ");
   }
+  if (isYoutubeTrack(t)) return "YouTube";
   return SOURCE_LABELS[t.source_type] ?? "Stream";
 }
 
@@ -119,6 +138,10 @@ function updateMoodFilterOptions(moods) {
   if (sorted.includes(current)) select.value = current;
 }
 
+function sourceBadge(t) {
+  return isYoutubeTrack(t) ? `<span class="yt-badge" title="Streams from YouTube">YT</span>` : "";
+}
+
 function moodBadge(t) {
   if (appTier !== "pro") return "";
   const mood = trackTags[t.id]?.mood?.[0];
@@ -146,7 +169,20 @@ function matchesFilters(t) {
   return true;
 }
 
+// Shows/hides the bits of chrome that depend on the current view.
+function syncViewChrome() {
+  const isYoutube = viewMode === "youtube";
+  document.getElementById("yt-panel").hidden = !isYoutube;
+  document.getElementById("search-row").hidden = appTier !== "pro" || isYoutube;
+  document.getElementById("remove-selected-btn").style.visibility = isYoutube ? "hidden" : "";
+}
+
 function renderTrackList() {
+  syncViewChrome();
+  if (viewMode === "youtube") {
+    renderYoutubeResults();
+    return;
+  }
   const container = document.getElementById("track-list");
   container.innerHTML = "";
   const baseTracks = viewMode === "foryou" ? forYouTracks : viewMode === "playlist" ? playlistTracks : tracks;
@@ -178,6 +214,7 @@ function renderTrackList() {
     row.className = classes.join(" ");
     row.innerHTML = `
       <span class="row-title">${escapeHtml(t.title)}</span>
+      ${sourceBadge(t)}
       ${moodBadge(t)}
       <span class="row-duration mono">${fmtDuration(t.duration_seconds)}</span>
       <div class="row-actions">
@@ -341,23 +378,30 @@ function setupSearch() {
   });
 }
 
+async function switchView(view) {
+  viewMode = view;
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+  hideSimilarPanel();
+
+  if (viewMode === "foryou") {
+    try {
+      forYouTracks = await invoke("for_you_queue", { limit: 40 });
+    } catch (e) {
+      console.error("for_you_queue failed", e);
+      forYouTracks = [];
+    }
+  }
+  if (viewMode === "youtube") {
+    refreshYoutubeStatus();
+  }
+  renderTrackList();
+}
+
 function setupViewTabs() {
-  document.getElementById("view-tabs").addEventListener("click", async (e) => {
+  document.getElementById("view-tabs").addEventListener("click", (e) => {
     const btn = e.target.closest(".tab-btn");
     if (!btn || btn.hidden) return;
-    viewMode = btn.dataset.view;
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b === btn));
-    hideSimilarPanel();
-
-    if (viewMode === "foryou") {
-      try {
-        forYouTracks = await invoke("for_you_queue", { limit: 40 });
-      } catch (e) {
-        console.error("for_you_queue failed", e);
-        forYouTracks = [];
-      }
-    }
-    renderTrackList();
+    switchView(btn.dataset.view);
   });
 }
 
@@ -401,8 +445,12 @@ async function showSimilarTracks(seedTrack) {
 }
 
 async function playTrack(trackId) {
-  const track = await invoke("play_track", { trackId });
-  applyNowPlayingTrack(track, true);
+  try {
+    const track = await invoke("play_track", { trackId });
+    applyNowPlayingTrack(track, true);
+  } catch (e) {
+    showToast(String(e));
+  }
   await pollNowPlaying();
 }
 
@@ -497,7 +545,7 @@ function renderNowPlaying(state) {
 
   if (state.track) {
     titleEl.textContent = state.track.title;
-    subEl.textContent = trackSubtitle(state.track);
+    subEl.textContent = state.loading ? "Loading from YouTube…" : trackSubtitle(state.track);
     miniTitleEl.textContent = state.track.title;
   } else {
     titleEl.textContent = "Nothing playing";
@@ -512,6 +560,9 @@ function renderNowPlaying(state) {
       ? `${state.track.title} — ${trackSubtitle(state.track)}`
       : "Resonate";
   }
+
+  if (state.error) showToast(state.error);
+  renderArt(state.track);
 
   playBtn.textContent = state.is_playing ? "⏸" : "▶";
   miniPlayBtn.textContent = state.is_playing ? "⏸" : "▶";
@@ -861,8 +912,10 @@ async function showBio() {
 function openYoutubeForCurrentTrack() {
   const track = nowPlaying?.track;
   if (!track) return;
-  const query = encodeURIComponent(`${track.artist ?? ""} ${track.title}`.trim());
-  openExternal(`https://www.youtube.com/results?search_query=${query}`);
+  const query = `${track.artist ?? ""} ${track.title}`.trim();
+  switchView("youtube");
+  document.getElementById("yt-search-input").value = query;
+  if (youtubeReady) runYoutubeSearch(query);
 }
 
 function setupUpsell() {
@@ -896,6 +949,243 @@ function setupEnrichment() {
   });
   modal.addEventListener("click", (e) => {
     if (e.target === modal) modal.hidden = true;
+  });
+}
+
+// ---------- YouTube ----------
+
+let toastTimer = null;
+
+function showToast(message) {
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.hidden = true;
+  }, 4500);
+}
+
+function renderArt(track) {
+  const img = document.getElementById("art-thumb");
+  const placeholder = document.getElementById("art-placeholder");
+  const videoId = youtubeVideoId(track);
+  if (videoId) {
+    const src = `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+    if (img.getAttribute("src") !== src) img.src = src;
+    const failed = img.dataset.failedSrc === src;
+    img.hidden = failed;
+    placeholder.hidden = !failed;
+  } else {
+    img.hidden = true;
+    img.removeAttribute("src");
+    placeholder.hidden = false;
+  }
+}
+
+function fmtMegabytes(bytes) {
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+async function refreshYoutubeStatus() {
+  try {
+    const status = await invoke("youtube_status");
+    youtubeReady = status.ready;
+    document.getElementById("yt-setup").hidden = status.ready;
+    document.getElementById("yt-search-form").hidden = !status.ready;
+    document.getElementById("yt-cache-row").hidden = !status.ready || status.cache_bytes === 0;
+    document.getElementById("yt-cache-info").textContent = `Offline cache: ${fmtMegabytes(status.cache_bytes)}`;
+    if (status.ready && viewMode === "youtube" && youtubeState === "idle") {
+      document.getElementById("yt-search-input").focus();
+    }
+  } catch (e) {
+    console.error("youtube_status failed", e);
+  }
+}
+
+function isYoutubePlaylistUrl(text) {
+  return /^https?:\/\/([\w-]+\.)?(youtube\.com|youtu\.be)\//i.test(text) && /[?&]list=/.test(text);
+}
+
+async function runYoutubeSearch(query) {
+  query = query.trim();
+  if (!query) return;
+  if (isYoutubePlaylistUrl(query)) {
+    await importYoutubePlaylist(query);
+    return;
+  }
+  youtubeState = "searching";
+  youtubeResults = [];
+  renderTrackList();
+  const btn = document.getElementById("yt-search-btn");
+  btn.disabled = true;
+  try {
+    youtubeResults = await invoke("youtube_search", { query });
+    youtubeState = "done";
+  } catch (e) {
+    youtubeState = "error";
+    youtubeMessage = String(e);
+  } finally {
+    btn.disabled = false;
+  }
+  renderTrackList();
+}
+
+async function importYoutubePlaylist(url) {
+  youtubeState = "searching";
+  youtubeResults = [];
+  renderTrackList();
+  document.getElementById("track-list").innerHTML = `<div class="empty-state">Importing playlist…</div>`;
+  try {
+    const imported = await invoke("youtube_import_playlist", { url });
+    let message = `Added ${imported.track_ids.length} tracks to your library`;
+    if (appTier === "pro" && imported.track_ids.length > 0) {
+      const playlistId = await invoke("create_playlist", { name: imported.title });
+      for (const trackId of imported.track_ids) {
+        await invoke("add_track_to_playlist", { playlistId, trackId });
+      }
+      await refreshPlaylists();
+      message = `Imported "${imported.title}" (${imported.track_ids.length} tracks)`;
+    }
+    if (imported.skipped > 0) message += `, ${imported.skipped} unavailable skipped`;
+    showToast(message);
+    youtubeState = "idle";
+    await refreshTracks();
+  } catch (e) {
+    youtubeState = "error";
+    youtubeMessage = String(e);
+    renderTrackList();
+  }
+}
+
+async function playYoutubeResult(index) {
+  try {
+    const track = await invoke("youtube_play", { results: youtubeResults, index });
+    applyNowPlayingTrack(track);
+  } catch (e) {
+    showToast(String(e));
+  }
+  await pollNowPlaying();
+}
+
+async function saveYoutubeResult(result) {
+  const trackId = await invoke("youtube_save", { result });
+  result.track_id = trackId;
+  result.in_library = true;
+  await refreshTracks();
+  return trackId;
+}
+
+function renderYoutubeResults() {
+  const container = document.getElementById("track-list");
+  container.innerHTML = "";
+
+  if (!youtubeReady) return;
+  if (youtubeState === "searching") {
+    container.innerHTML = `<div class="empty-state">Searching YouTube…</div>`;
+    return;
+  }
+  if (youtubeState === "error") {
+    container.innerHTML = `<div class="empty-state">${escapeHtml(youtubeMessage)}</div>`;
+    return;
+  }
+  if (youtubeResults.length === 0) {
+    container.innerHTML =
+      youtubeState === "done"
+        ? `<div class="empty-state">No results.</div>`
+        : `<div class="empty-state">Search for a song or artist. Paste a playlist link to import a whole playlist.</div>`;
+    return;
+  }
+
+  const activeVideoId = youtubeVideoId(nowPlaying?.track);
+  const showPlaylistAdd = appTier === "pro" && activePlaylistId;
+
+  youtubeResults.forEach((r, index) => {
+    const row = document.createElement("div");
+    row.className = "track-row yt-row" + (r.video_id === activeVideoId ? " active" : "");
+    row.innerHTML = `
+      <img class="yt-thumb" src="${escapeHtml(r.thumbnail)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'" />
+      <div class="yt-row-text">
+        <span class="row-title">${escapeHtml(r.title)}</span>
+        <span class="yt-row-artist">${escapeHtml(r.artist)}</span>
+      </div>
+      <span class="row-duration mono">${fmtDuration(r.duration_seconds)}</span>
+      <div class="row-actions">
+        ${showPlaylistAdd ? `<button class="row-playlist-add" title="Add to playlist">+</button>` : ""}
+        <button class="row-save ${r.in_library ? "saved" : ""}" title="${r.in_library ? "In your library" : "Save to library"}">${r.in_library ? "✓" : "♡"}</button>
+      </div>
+    `;
+    row.addEventListener("click", () => playYoutubeResult(index));
+    row.querySelector(".row-save").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (r.in_library) return;
+      try {
+        await saveYoutubeResult(r);
+        showToast(`Saved "${r.title}" to your library`);
+      } catch (err) {
+        showToast(String(err));
+      }
+      renderTrackList();
+    });
+    row.querySelector(".row-playlist-add")?.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        const trackId = r.track_id ?? (await saveYoutubeResult(r));
+        await invoke("add_track_to_playlist", { playlistId: activePlaylistId, trackId });
+        await refreshPlaylists();
+        showToast(`Added "${r.title}" to the playlist`);
+      } catch (err) {
+        showToast(String(err));
+      }
+      renderTrackList();
+    });
+    container.appendChild(row);
+  });
+}
+
+function setupYoutube() {
+  // Offline / thumbnail missing: fall back to the ♪ placeholder.
+  document.getElementById("art-thumb").addEventListener("error", (e) => {
+    e.currentTarget.dataset.failedSrc = e.currentTarget.getAttribute("src");
+    e.currentTarget.hidden = true;
+    document.getElementById("art-placeholder").hidden = false;
+  });
+
+  document.getElementById("yt-search-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    runYoutubeSearch(document.getElementById("yt-search-input").value);
+  });
+
+  document.getElementById("yt-cache-clear-btn").addEventListener("click", async () => {
+    await invoke("youtube_clear_cache");
+    await refreshYoutubeStatus();
+  });
+
+  const setupBtn = document.getElementById("yt-setup-btn");
+  const progressEl = document.getElementById("yt-setup-progress");
+  listen("youtube-setup-progress", (event) => {
+    const { stage, downloaded, total } = event.payload;
+    progressEl.textContent = total
+      ? `${stage}: ${fmtMegabytes(downloaded)} / ${fmtMegabytes(total)}`
+      : downloaded
+        ? `${stage}: ${fmtMegabytes(downloaded)}`
+        : `${stage}…`;
+  });
+  setupBtn.addEventListener("click", async () => {
+    setupBtn.disabled = true;
+    setupBtn.textContent = "Setting up…";
+    progressEl.textContent = "Starting download…";
+    try {
+      await invoke("youtube_setup");
+      progressEl.textContent = "";
+      await refreshYoutubeStatus();
+      renderTrackList();
+    } catch (e) {
+      progressEl.textContent = `Setup failed: ${e}`;
+    } finally {
+      setupBtn.disabled = false;
+      setupBtn.textContent = "Set up YouTube";
+    }
   });
 }
 
@@ -1008,6 +1298,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupPlaylists();
   setupSearch();
   setupEnrichment();
+  setupYoutube();
   document.getElementById("similar-close-btn").addEventListener("click", hideSimilarPanel);
 
   try {
@@ -1029,6 +1320,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     setupUpsell();
   }
 
+  await refreshYoutubeStatus();
   await refreshFolders();
   await refreshTracks();
   await pollNowPlaying();

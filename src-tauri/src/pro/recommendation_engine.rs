@@ -147,7 +147,8 @@ pub fn for_you_queue(conn: &Connection, limit: usize) -> Result<Vec<i64>, String
                  FROM tracks t
                  JOIN track_features tf ON tf.track_id = t.id
                  LEFT JOIN track_affinity a ON a.track_id = t.id
-                 WHERE t.source_type = 'local' AND t.in_library = 1",
+                 WHERE (t.source_type = 'local' OR t.stream_url LIKE 'https://www.youtube.com/watch?v=%')
+                   AND t.in_library = 1",
             )
             .map_err(|e| e.to_string())?;
         let result: Vec<Candidate> = stmt
