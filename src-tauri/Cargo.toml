@@ -15,10 +15,10 @@ name = "resonate_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = []
+default = ["pro"]
 # Phase 3+ intelligence layer (feature extraction, mood tagging, affinity
-# engine, recommendations) and other advanced/paid-tier functionality lives
-# behind this flag. The default (free-tier) build excludes it entirely.
+# engine, recommendations, playlists, EQ, themes...). Enabled by default; a
+# minimal player can still be built with --no-default-features.
 pro = ["dep:chrono", "dep:rand", "dep:percent-encoding"]
 
 [build-dependencies]
